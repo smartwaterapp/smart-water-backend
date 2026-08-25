@@ -61,19 +61,36 @@ def create_channel(channel: ChannelCreate, db: Session = Depends(get_db)):
 
 # --- ThingSpeak Compatible Endpoints ---
 
-last_alarm_time = {"tank1": 0, "tank3": 0}
-TELEGRAM_TOKEN = "8994007169:AAFl1cfVzYXZyE1x7K6RhvqAFEtWakXmLuM"
-TELEGRAM_CHAT_ID = "693872472"
+import smtplib
+from email.message import EmailMessage
 
-def send_telegram_alarm(tank_name, percentage):
-    msg = f"⚠️ ALARM: {tank_name} water level is extremely low! ({percentage}%)"
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    data = json.dumps({"chat_id": TELEGRAM_CHAT_ID, "text": msg}).encode('utf-8')
-    req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+last_alarm_time = {"tank1": 0, "tank3": 0}
+
+# ===== GMAIL CONFIGURATION =====
+# You MUST put your Gmail and App Password here before uploading to GitHub!
+GMAIL_SENDER = "the.smart.water.app@gmail.com"
+GMAIL_APP_PASSWORD = "lhdmvbptobgzjapa"
+
+def send_email_alarm(target_email, tank_name, percentage):
+    if not target_email or target_email == "none": return
+    if GMAIL_SENDER == "the.smart.water.app@gmail.com":
+        print("Gmail not configured! Cannot send email.")
+        return
+        
+    msg = EmailMessage()
+    msg.set_content(f"⚠️ URGENT ALARM: {tank_name} water level is critically low! (Currently at {percentage}%)\n\nPlease turn on the pump.")
+    msg['Subject'] = f"🚨 Water Alarm: {tank_name} is Low!"
+    msg['From'] = GMAIL_SENDER
+    msg['To'] = target_email
+
     try:
-        urllib.request.urlopen(req, timeout=5)
+        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+        server.login(GMAIL_SENDER, GMAIL_APP_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        print(f"Email successfully sent to {target_email}!")
     except Exception as e:
-        print("Telegram error:", e)
+        print("Failed to send email:", e)
 
 @app.get("/update", tags=["Data Update"])
 def update_channel(
@@ -100,39 +117,50 @@ def update_channel(
     db.commit()
     db.refresh(db_feed)
 
-    # TELEGRAM ALARM LOGIC
+    # ALARM LOGIC
     if field1 is not None or field3 is not None:
-        def get_last_val(field_name):
+        def get_last_val_str(field_name):
             f = db.query(getattr(models.Feed, field_name)).filter(models.Feed.channel_id == channel.id, getattr(models.Feed, field_name) != None).order_by(models.Feed.created_at.desc()).first()
-            return float(f[0]) if f else None
+            return f[0] if f else None
             
-        threshold = get_last_val("field8")
-        if threshold is None: threshold = 20.0 # Default alarm threshold
+        alarm_data = get_last_val_str("field8")
+        target_email = "none"
+        threshold = 20.0
+        
+        if alarm_data:
+            parts = alarm_data.split("|")
+            if len(parts) == 2:
+                target_email = parts[0]
+                try: threshold = float(parts[1])
+                except: pass
+            else:
+                try: threshold = float(alarm_data)
+                except: pass
 
         if field1 is not None:
-            t1_tank = get_last_val("field4")
-            t1_water = get_last_val("field5")
-            if t1_tank and t1_water:
-                water_cm = t1_tank - float(field1)
+            t1_tank_str = get_last_val_str("field4")
+            t1_water_str = get_last_val_str("field5")
+            if t1_tank_str and t1_water_str:
+                water_cm = float(t1_tank_str) - float(field1)
                 if water_cm >= 0:
-                    pct1 = max(0, min(100, int((water_cm / t1_water) * 100)))
+                    pct1 = max(0, min(100, int((water_cm / float(t1_water_str)) * 100)))
                     if pct1 <= threshold:
                         now = time.time()
-                        if now - last_alarm_time["tank1"] > 3600: # 1 hour cooldown
-                            send_telegram_alarm("Tank 1", pct1)
+                        if now - last_alarm_time["tank1"] > 3600:
+                            send_email_alarm(target_email, "Tank 1", pct1)
                             last_alarm_time["tank1"] = now
 
         if field3 is not None:
-            t3_tank = get_last_val("field6")
-            t3_water = get_last_val("field7")
-            if t3_tank and t3_water:
-                water_cm = t3_tank - float(field3)
+            t3_tank_str = get_last_val_str("field6")
+            t3_water_str = get_last_val_str("field7")
+            if t3_tank_str and t3_water_str:
+                water_cm = float(t3_tank_str) - float(field3)
                 if water_cm >= 0:
-                    pct3 = max(0, min(100, int((water_cm / t3_water) * 100)))
+                    pct3 = max(0, min(100, int((water_cm / float(t3_water_str)) * 100)))
                     if pct3 <= threshold:
                         now = time.time()
-                        if now - last_alarm_time["tank3"] > 3600: # 1 hour cooldown
-                            send_telegram_alarm("Tank 3", pct3)
+                        if now - last_alarm_time["tank3"] > 3600:
+                            send_email_alarm(target_email, "Tank 3", pct3)
                             last_alarm_time["tank3"] = now
 
     entry_count = db.query(models.Feed).filter(models.Feed.channel_id == channel.id).count()
