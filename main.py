@@ -110,7 +110,7 @@ def update_channel(
         if api_key == "IPwXiTFSujeNNWd2HAMRfg":
             # Auto-create the hardcoded main channel for the user
             channel = models.Channel(
-                id=3211060,
+                id=2,
                 name="Smart Water Channel",
                 write_api_key="IPwXiTFSujeNNWd2HAMRfg",
                 read_api_key="v_9jxuU6dHmXxNUsCdcERA"
@@ -125,7 +125,7 @@ def update_channel(
         elif api_key == "MOTOR_WRITE_KEY":
             # Auto-create the Motor Control channel
             channel = models.Channel(
-                id=4211060,
+                id=3,
                 name="Motor Control Channel",
                 write_api_key="MOTOR_WRITE_KEY",
                 read_api_key="MOTOR_READ_KEY"
@@ -139,6 +139,18 @@ def update_channel(
                 channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
         else:
             raise HTTPException(status_code=400, detail="Invalid API Key")
+
+    # Inherit missing fields from the previous entry so data doesn't temporarily disappear!
+    prev_feed = db.query(models.Feed).filter(models.Feed.channel_id == channel.id).order_by(models.Feed.created_at.desc()).first()
+    if prev_feed:
+        if field1 is None: field1 = prev_feed.field1
+        if field2 is None: field2 = prev_feed.field2
+        if field3 is None: field3 = prev_feed.field3
+        if field4 is None: field4 = prev_feed.field4
+        if field5 is None: field5 = prev_feed.field5
+        if field6 is None: field6 = prev_feed.field6
+        if field7 is None: field7 = prev_feed.field7
+        if field8 is None: field8 = prev_feed.field8
 
     db_feed = models.Feed(
         channel_id=channel.id, field1=field1, field2=field2, field3=field3,
