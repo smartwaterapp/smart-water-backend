@@ -120,12 +120,23 @@ def update_channel(
             elif api_key == "MOTOR_WRITE_KEY":
                 channel = models.Channel(id=3, name="Motor Control Channel", write_api_key="MOTOR_WRITE_KEY", read_api_key="MOTOR_READ_KEY")
                 db.add(channel)
-                try:
-                    db.commit()
-                    db.refresh(channel)
-                except:
-                    db.rollback()
-                    channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
+                try: db.commit(); db.refresh(channel)
+                except: db.rollback(); channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
+            elif api_key == "TITA_WRITE_KEY":
+                channel = models.Channel(id=4, name="Tita Main Tanks", write_api_key="TITA_WRITE_KEY", read_api_key="TITA_READ_KEY")
+                db.add(channel)
+                try: db.commit(); db.refresh(channel)
+                except: db.rollback(); channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
+            elif api_key == "TITA_M1_WRITE":
+                channel = models.Channel(id=5, name="Tita Motor 1", write_api_key="TITA_M1_WRITE", read_api_key="TITA_M1_READ")
+                db.add(channel)
+                try: db.commit(); db.refresh(channel)
+                except: db.rollback(); channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
+            elif api_key == "TITA_M2_WRITE":
+                channel = models.Channel(id=6, name="Tita Motor 2", write_api_key="TITA_M2_WRITE", read_api_key="TITA_M2_READ")
+                db.add(channel)
+                try: db.commit(); db.refresh(channel)
+                except: db.rollback(); channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
             else:
                 raise HTTPException(status_code=400, detail="Invalid API Key")
 
