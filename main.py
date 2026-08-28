@@ -107,7 +107,38 @@ def update_channel(
 ):
     channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
     if not channel:
-        raise HTTPException(status_code=400, detail="Invalid API Key")
+        if api_key == "IPwXiTFSujeNNWd2HAMRfg":
+            # Auto-create the hardcoded main channel for the user
+            channel = models.Channel(
+                id=3211060,
+                name="Smart Water Channel",
+                write_api_key="IPwXiTFSujeNNWd2HAMRfg",
+                read_api_key="v_9jxuU6dHmXxNUsCdcERA"
+            )
+            db.add(channel)
+            try:
+                db.commit()
+                db.refresh(channel)
+            except:
+                db.rollback()
+                channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
+        elif api_key == "MOTOR_WRITE_KEY":
+            # Auto-create the Motor Control channel
+            channel = models.Channel(
+                id=4211060,
+                name="Motor Control Channel",
+                write_api_key="MOTOR_WRITE_KEY",
+                read_api_key="MOTOR_READ_KEY"
+            )
+            db.add(channel)
+            try:
+                db.commit()
+                db.refresh(channel)
+            except:
+                db.rollback()
+                channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
+        else:
+            raise HTTPException(status_code=400, detail="Invalid API Key")
 
     db_feed = models.Feed(
         channel_id=channel.id, field1=field1, field2=field2, field3=field3,
