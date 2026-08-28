@@ -78,8 +78,8 @@ def send_email_alarm(target_email, tank_name, percentage):
         return
         
     msg = EmailMessage()
-    msg.set_content(f"⚠️ URGENT ALARM: {tank_name} water level is critically low! (Currently at {percentage}%)\n\nPlease turn on the pump.")
-    msg['Subject'] = f"🚨 Water Alarm: {tank_name} is Low!"
+    msg.set_content(f"âš ï¸  URGENT ALARM: {tank_name} water level is critically low! (Currently at {percentage}%)\n\nPlease turn on the pump.")
+    msg['Subject'] = f"ðŸš¨ Water Alarm: {tank_name} is Low!"
     msg['From'] = GMAIL_SENDER
     msg['To'] = target_email
 
@@ -105,133 +105,119 @@ def update_channel(
     field8: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
-    if not channel:
-        if api_key == "IPwXiTFSujeNNWd2HAMRfg":
-            # Auto-create the hardcoded main channel for the user
-            channel = models.Channel(
-                id=2,
-                name="Smart Water Channel",
-                write_api_key="IPwXiTFSujeNNWd2HAMRfg",
-                read_api_key="v_9jxuU6dHmXxNUsCdcERA"
-            )
-            db.add(channel)
-            try:
-                db.commit()
-                db.refresh(channel)
-            except:
-                db.rollback()
-                channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
-        elif api_key == "MOTOR_WRITE_KEY":
-            # Auto-create the Motor Control channel
-            channel = models.Channel(
-                id=3,
-                name="Motor Control Channel",
-                write_api_key="MOTOR_WRITE_KEY",
-                read_api_key="MOTOR_READ_KEY"
-            )
-            db.add(channel)
-            try:
-                db.commit()
-                db.refresh(channel)
-            except:
-                db.rollback()
-                channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
-        else:
-            raise HTTPException(status_code=400, detail="Invalid API Key")
-
-    # Inherit missing fields from the previous entry so data doesn't temporarily disappear!
-    prev_feed = db.query(models.Feed).filter(models.Feed.channel_id == channel.id).order_by(models.Feed.created_at.desc()).first()
-    if prev_feed:
-        if field1 is None: field1 = prev_feed.field1
-        if field2 is None: field2 = prev_feed.field2
-        if field3 is None: field3 = prev_feed.field3
-        if field4 is None: field4 = prev_feed.field4
-        if field5 is None: field5 = prev_feed.field5
-        if field6 is None: field6 = prev_feed.field6
-        if field7 is None: field7 = prev_feed.field7
-        if field8 is None: field8 = prev_feed.field8
-
-    db_feed = models.Feed(
-        channel_id=channel.id, field1=field1, field2=field2, field3=field3,
-        field4=field4, field5=field5, field6=field6, field7=field7, field8=field8
-    )
-    db.add(db_feed)
-    db.commit()
-    db.refresh(db_feed)
-
-    # ALARM LOGIC
-    if field1 is not None or field3 is not None:
-        def get_last_val_str(field_name):
-            f = db.query(getattr(models.Feed, field_name)).filter(models.Feed.channel_id == channel.id, getattr(models.Feed, field_name) != None).order_by(models.Feed.created_at.desc()).first()
-            return f[0] if f else None
-            
-        alarm_data = get_last_val_str("field8")
-        target_email = "none"
-        threshold = 20.0
-        
-        if alarm_data:
-            parts = alarm_data.split("|")
-            if len(parts) == 2:
-                target_email = parts[0]
-                try: threshold = float(parts[1])
-                except: pass
+    try:
+        channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
+        if not channel:
+            if api_key == "IPwXiTFSujeNNWd2HAMRfg":
+                channel = models.Channel(id=2, name="Smart Water Channel", write_api_key="IPwXiTFSujeNNWd2HAMRfg", read_api_key="v_9jxuU6dHmXxNUsCdcERA")
+                db.add(channel)
+                try:
+                    db.commit()
+                    db.refresh(channel)
+                except:
+                    db.rollback()
+                    channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
+            elif api_key == "MOTOR_WRITE_KEY":
+                channel = models.Channel(id=3, name="Motor Control Channel", write_api_key="MOTOR_WRITE_KEY", read_api_key="MOTOR_READ_KEY")
+                db.add(channel)
+                try:
+                    db.commit()
+                    db.refresh(channel)
+                except:
+                    db.rollback()
+                    channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
             else:
-                try: threshold = float(alarm_data)
-                except: pass
+                raise HTTPException(status_code=400, detail="Invalid API Key")
 
-        if field1 is not None:
-            t1_tank_str = get_last_val_str("field4")
-            t1_water_str = get_last_val_str("field5")
-            if t1_tank_str and t1_water_str:
-                water_cm = float(t1_tank_str) - float(field1)
-                if water_cm >= 0:
-                    pct1 = max(0, min(100, int((water_cm / float(t1_water_str)) * 100)))
-                    if pct1 <= threshold:
-                        now = time.time()
-                        if now - last_alarm_time["tank1"] > 3600:
-                            send_email_alarm(target_email, "Tank 1", pct1)
-                            last_alarm_time["tank1"] = now
+        # Inherit fields
+        prev_feed = db.query(models.Feed).filter(models.Feed.channel_id == channel.id).order_by(models.Feed.created_at.desc()).first()
+        if prev_feed:
+            if field1 is None: field1 = prev_feed.field1
+            if field2 is None: field2 = prev_feed.field2
+            if field3 is None: field3 = prev_feed.field3
+            if field4 is None: field4 = prev_feed.field4
+            if field5 is None: field5 = prev_feed.field5
+            if field6 is None: field6 = prev_feed.field6
+            if field7 is None: field7 = prev_feed.field7
+            if field8 is None: field8 = prev_feed.field8
 
-        if field3 is not None:
-            t3_tank_str = get_last_val_str("field6")
-            t3_water_str = get_last_val_str("field7")
-            if t3_tank_str and t3_water_str:
-                water_cm = float(t3_tank_str) - float(field3)
-                if water_cm >= 0:
-                    pct3 = max(0, min(100, int((water_cm / float(t3_water_str)) * 100)))
-                    if pct3 <= threshold:
-                        now = time.time()
-                        if now - last_alarm_time["tank3"] > 3600:
-                            send_email_alarm(target_email, "Tank 3", pct3)
-                            last_alarm_time["tank3"] = now
+        db_feed = models.Feed(
+            channel_id=channel.id, field1=field1, field2=field2, field3=field3,
+            field4=field4, field5=field5, field6=field6, field7=field7, field8=field8
+        )
+        db.add(db_feed)
+        db.commit()
 
-    entry_count = db.query(models.Feed).filter(models.Feed.channel_id == channel.id).count()
-    return entry_count
+        # Alarm logic
+        if field1 is not None or field3 is not None:
+            def get_last_val_str(field_name):
+                f = db.query(getattr(models.Feed, field_name)).filter(models.Feed.channel_id == channel.id, getattr(models.Feed, field_name) != None).order_by(models.Feed.created_at.desc()).first()
+                return f[0] if f else None
+                
+            alarm_data = get_last_val_str("field8")
+            target_email = "none"
+            threshold = 20.0
+            
+            if alarm_data:
+                parts = alarm_data.split("|")
+                if len(parts) == 2:
+                    target_email = parts[0]
+                    try: threshold = float(parts[1])
+                    except: pass
+                else:
+                    try: threshold = float(alarm_data)
+                    except: pass
+
+            if target_email != "none":
+                import datetime
+                if field1 is not None:
+                    try:
+                        pct1 = float(field1)
+                        if pct1 < threshold:
+                            now = datetime.datetime.utcnow()
+                            last = last_alarm_time.get("tank1")
+                            if not last or (now - last).total_seconds() > 3600:
+                                send_email_alarm(target_email, "Tank 1", pct1)
+                                last_alarm_time["tank1"] = now
+                    except: pass
+                if field3 is not None:
+                    try:
+                        pct3 = float(field3)
+                        if pct3 < threshold:
+                            now = datetime.datetime.utcnow()
+                            last = last_alarm_time.get("tank3")
+                            if not last or (now - last).total_seconds() > 3600:
+                                send_email_alarm(target_email, "Tank 3", pct3)
+                                last_alarm_time["tank3"] = now
+                    except: pass
+
+        entry_count = db.query(models.Feed).filter(models.Feed.channel_id == channel.id).count()
+        return entry_count
+        
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        return str(traceback.format_exc())
 
 
 @app.get("/channels/{channel_id}/feeds.json", tags=["Data Retrieval"])
 def read_feeds(
-    channel_id: int,
-    api_key: Optional[str] = Query(None, description="Read API Key (if channel is private)"),
-    results: int = Query(100, description="Number of entries to retrieve"),
+    channel_id: int, 
+    api_key: str, 
+    results: int = 100,
     db: Session = Depends(get_db)
 ):
-    """
-    Retrieve feeds for a channel. Mimics the ThingSpeak GET feeds JSON endpoint.
-    """
     channel = db.query(models.Channel).filter(models.Channel.id == channel_id).first()
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
         
-    # In a real app you might check if the channel is public, but for now we enforce the read key
     if channel.read_api_key != api_key:
         raise HTTPException(status_code=403, detail="Invalid Read API Key")
 
     feeds = db.query(models.Feed).filter(models.Feed.channel_id == channel_id)\
-              .order_by(models.Feed.created_at.desc())\
-              .limit(results).all()
-              
+             .order_by(models.Feed.created_at.desc())\
+             .limit(results).all()
+             
     # Format response to look similar to ThingSpeak
     response = {
         "channel": {
@@ -240,6 +226,12 @@ def read_feeds(
             "description": channel.description,
             "field1": channel.field1_name,
             "field2": channel.field2_name,
+            "field3": channel.field3_name,
+            "field4": channel.field4_name,
+            "field5": channel.field5_name,
+            "field6": channel.field6_name,
+            "field7": channel.field7_name,
+            "field8": channel.field8_name,
         },
         "feeds": [
             {
@@ -253,26 +245,24 @@ def read_feeds(
                 "field6": feed.field6,
                 "field7": feed.field7,
                 "field8": feed.field8,
-            }
-            for feed in reversed(feeds) # Chronological order
+            } for feed in reversed(feeds)
         ]
     }
     return response
 
-@app.get("/channels/{channel_id}/fields/{field_id}/last", tags=["Data Retrieval"])
+@app.get("/channels/{channel_id}/fields/{field_id}/last.json", tags=["Data Retrieval"])
 def read_last_field(
     channel_id: int,
     field_id: int,
-    api_key: Optional[str] = Query(None, description="Read API Key"),
+    api_key: str,
     db: Session = Depends(get_db)
 ):
-    """
-    Retrieve the last value of a specific field. Mimics ThingSpeak's last field endpoint.
-    Returns plain text.
-    """
+    if field_id < 1 or field_id > 8:
+        raise HTTPException(status_code=400, detail="Invalid field ID (must be 1-8)")
+
     channel = db.query(models.Channel).filter(models.Channel.id == channel_id).first()
     if not channel:
-        raise HTTPException(status_code=404, detail="-1")
+        return "-1"
         
     if channel.read_api_key != api_key:
         raise HTTPException(status_code=403, detail="-1")
@@ -284,13 +274,8 @@ def read_last_field(
         return "-1"
         
     # Get the specific field
-    field_value = getattr(feed, f"field{field_id}", None)
+    field_value = getattr(feed, f"field{field_id}")
     if field_value is None:
         return "-1"
         
-    from fastapi.responses import PlainTextResponse
-    return PlainTextResponse(str(field_value))
-
-@app.get("/", tags=["Health"])
-def root():
-    return {"message": "Smart Water Backend is running. Access /docs for API documentation."}
+    return str(field_value)
