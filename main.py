@@ -17,6 +17,32 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Smart Water Backend (ThingSpeak Clone)")
 
+# ── Seed known channels on startup so reads never 404 after a fresh deploy ──
+_SEED_CHANNELS = [
+    {"id": 2, "name": "Smart Water Channel",  "write_api_key": "IPwXiTFSujeNNWd2HAMRfg", "read_api_key": "v_9jxuU6dHmXxNUsCdcERA"},
+    {"id": 3, "name": "Motor Control Channel", "write_api_key": "MOTOR_WRITE_KEY",        "read_api_key": "MOTOR_READ_KEY"},
+    {"id": 4, "name": "Tita Main Tanks",       "write_api_key": "TITA_WRITE_KEY",         "read_api_key": "TITA_READ_KEY"},
+    {"id": 5, "name": "Tita Motor 1",          "write_api_key": "TITA_M1_WRITE",          "read_api_key": "TITA_M1_READ"},
+    {"id": 6, "name": "Tita Motor 2",          "write_api_key": "TITA_M2_WRITE",          "read_api_key": "TITA_M2_READ"},
+]
+
+@app.on_event("startup")
+def seed_channels():
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        for ch in _SEED_CHANNELS:
+            exists = db.query(models.Channel).filter(models.Channel.id == ch["id"]).first()
+            if not exists:
+                db.add(models.Channel(**ch))
+        db.commit()
+        print(f"✅ Seeded {len(_SEED_CHANNELS)} channels (skipped existing)")
+    except Exception as e:
+        db.rollback()
+        print(f"⚠️ Channel seeding error: {e}")
+    finally:
+        db.close()
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
