@@ -262,14 +262,20 @@ def read_feeds(
     results: int = 100,
     db: Session = Depends(get_db)
 ):
+    # Lookup by ID, or fallback to matching by read_api_key (supports channel 2 alias for channel 3211060)
     channel = db.query(models.Channel).filter(models.Channel.id == channel_id).first()
+    if not channel and channel_id == 2:
+        channel = db.query(models.Channel).filter(models.Channel.id == 3211060).first()
+    if not channel:
+        channel = db.query(models.Channel).filter(models.Channel.read_api_key == api_key).first()
+        
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
         
     if channel.read_api_key != api_key:
         raise HTTPException(status_code=403, detail="Invalid Read API Key")
 
-    feeds = db.query(models.Feed).filter(models.Feed.channel_id == channel_id)\
+    feeds = db.query(models.Feed).filter(models.Feed.channel_id == channel.id)\
              .order_by(models.Feed.created_at.desc())\
              .limit(results).all()
              
