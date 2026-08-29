@@ -17,6 +17,24 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Smart Water Backend (ThingSpeak Clone)")
 
+from fastapi.responses import HTMLResponse
+
+@app.get('/', response_class=HTMLResponse, tags=['Dashboard'])
+def web_dashboard(db: Session = Depends(get_db)):
+    channels = db.query(models.Channel).all()
+    html = '<html><head><title>Smart Water Dashboard</title><style>body{font-family:sans-serif; padding:20px; background:#f4f4f9;} .card{background:white; padding:20px; margin-bottom:15px; border-radius:8px; box-shadow:0 2px 5px rgba(0,0,0,0.1);}</style></head><body>'
+    html += '<h1>?? Smart Water Web Dashboard</h1>'
+    if not channels:
+        html += '<p>No channels found in database.</p>'
+    for c in channels:
+        html += f'<div class="card"><h2>{c.name} (ID: {c.id})</h2>'
+        html += f'<p><b>Read API Key:</b> {c.read_api_key}</p>'
+        html += f'<p><b>Write API Key:</b> {c.write_api_key}</p>'
+        html += f'<a href="/channels/{c.id}/feeds.json?api_key={c.read_api_key}&results=5" target="_blank">View Recent Data (JSON)</a>'
+        html += '</div>'
+    html += '</body></html>'
+    return html
+
 # ── Seed known channels on startup so reads never 404 after a fresh deploy ──
 _SEED_CHANNELS = [
     {"id": 2, "name": "Smart Water Channel",  "write_api_key": "IPwXiTFSujeNNWd2HAMRfg", "read_api_key": "v_9jxuU6dHmXxNUsCdcERA"},
