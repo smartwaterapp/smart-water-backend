@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, Query
+﻿from fastapi import FastAPI, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import Optional, List
 import models
@@ -14,16 +14,15 @@ import json
 models.Base.metadata.create_all(bind=engine)
 
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 
 app = FastAPI(title="Smart Water Backend (ThingSpeak Clone)")
-
-from fastapi.responses import HTMLResponse
 
 @app.get('/', response_class=HTMLResponse, tags=['Dashboard'])
 def web_dashboard(db: Session = Depends(get_db)):
     channels = db.query(models.Channel).all()
     html = '<html><head><title>Smart Water Dashboard</title><style>body{font-family:sans-serif; padding:20px; background:#f4f4f9;} .card{background:white; padding:20px; margin-bottom:15px; border-radius:8px; box-shadow:0 2px 5px rgba(0,0,0,0.1);}</style></head><body>'
-    html += '<h1>?? Smart Water Web Dashboard</h1>'
+    html += '<h1>💧 Smart Water Web Dashboard</h1>'
     if not channels:
         html += '<p>No channels found in database.</p>'
     for c in channels:
@@ -38,10 +37,11 @@ def web_dashboard(db: Session = Depends(get_db)):
 # ── Seed known channels on startup so reads never 404 after a fresh deploy ──
 _SEED_CHANNELS = [
     {"id": 2, "name": "Smart Water Channel",  "write_api_key": "IPwXiTFSujeNNWd2HAMRfg", "read_api_key": "v_9jxuU6dHmXxNUsCdcERA"},
-    {"id": 3, "name": "Motor Control Channel", "write_api_key": "MOTOR_WRITE_KEY",        "read_api_key": "MOTOR_READ_KEY"},
+    {"id": 3, "name": "Tank 3 Motor Channel", "write_api_key": "MOTOR_WRITE_KEY",        "read_api_key": "MOTOR_READ_KEY"},
     {"id": 4, "name": "Tita Main Tanks",       "write_api_key": "TITA_WRITE_KEY",         "read_api_key": "TITA_READ_KEY"},
     {"id": 5, "name": "Tita Motor 1",          "write_api_key": "TITA_M1_WRITE",          "read_api_key": "TITA_M1_READ"},
     {"id": 6, "name": "Tita Motor 2",          "write_api_key": "TITA_M2_WRITE",          "read_api_key": "TITA_M2_READ"},
+    {"id": 7, "name": "Tank 1 Motor Channel",   "write_api_key": "TANK1_M_WRITE",          "read_api_key": "TANK1_M_READ"},
 ]
 
 @app.on_event("startup")
@@ -122,8 +122,8 @@ def send_email_alarm(target_email, tank_name, percentage):
         return
         
     msg = EmailMessage()
-    msg.set_content(f"âš ï¸  URGENT ALARM: {tank_name} water level is critically low! (Currently at {percentage}%)\n\nPlease turn on the pump.")
-    msg['Subject'] = f"ðŸš¨ Water Alarm: {tank_name} is Low!"
+    msg.set_content(f"⚠️ URGENT ALARM: {tank_name} water level is critically low! (Currently at {percentage}%)\n\nPlease turn on the pump.")
+    msg['Subject'] = f"🚨 Water Alarm: {tank_name} is Low!"
     msg['From'] = GMAIL_SENDER
     msg['To'] = target_email
 
@@ -162,7 +162,7 @@ def update_channel(
                     db.rollback()
                     channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
             elif api_key == "MOTOR_WRITE_KEY":
-                channel = models.Channel(id=3, name="Motor Control Channel", write_api_key="MOTOR_WRITE_KEY", read_api_key="MOTOR_READ_KEY")
+                channel = models.Channel(id=3, name="Tank 3 Motor Channel", write_api_key="MOTOR_WRITE_KEY", read_api_key="MOTOR_READ_KEY")
                 db.add(channel)
                 try: db.commit(); db.refresh(channel)
                 except: db.rollback(); channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
@@ -178,6 +178,11 @@ def update_channel(
                 except: db.rollback(); channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
             elif api_key == "TITA_M2_WRITE":
                 channel = models.Channel(id=6, name="Tita Motor 2", write_api_key="TITA_M2_WRITE", read_api_key="TITA_M2_READ")
+                db.add(channel)
+                try: db.commit(); db.refresh(channel)
+                except: db.rollback(); channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
+            elif api_key == "TANK1_M_WRITE":
+                channel = models.Channel(id=7, name="Tank 1 Motor Channel", write_api_key="TANK1_M_WRITE", read_api_key="TANK1_M_READ")
                 db.add(channel)
                 try: db.commit(); db.refresh(channel)
                 except: db.rollback(); channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
