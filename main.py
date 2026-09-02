@@ -1,4 +1,4 @@
-﻿from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi import FastAPI, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import Optional, List
 import models
@@ -265,6 +265,7 @@ def read_feeds(
     channel_id: int, 
     api_key: str, 
     results: int = 100,
+    minutes: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
     # Lookup by ID, or fallback to matching by read_api_key (supports channel 2 alias for channel 3211060)
@@ -280,9 +281,16 @@ def read_feeds(
     if channel.read_api_key != api_key:
         raise HTTPException(status_code=403, detail="Invalid Read API Key")
 
-    feeds = db.query(models.Feed).filter(models.Feed.channel_id == channel.id)\
-             .order_by(models.Feed.created_at.desc())\
-             .limit(results).all()
+    query = db.query(models.Feed).filter(models.Feed.channel_id == channel.id)
+    
+    if minutes is not None and minutes > 0:
+        import datetime
+        cutoff = datetime.datetime.utcnow() - datetime.timedelta(minutes=minutes)
+        query = query.filter(models.Feed.created_at >= cutoff)
+        feeds = query.order_by(models.Feed.created_at.asc()).all()
+    else:
+        feeds = query.order_by(models.Feed.created_at.desc()).limit(results).all()
+        feeds = list(reversed(feeds))
              
     # Format response to look similar to ThingSpeak
     response = {
