@@ -42,6 +42,7 @@ _SEED_CHANNELS = [
     {"id": 5, "name": "Tita Motor 1",          "write_api_key": "TITA_M1_WRITE",          "read_api_key": "TITA_M1_READ"},
     {"id": 6, "name": "Tita Motor 2",          "write_api_key": "TITA_M2_WRITE",          "read_api_key": "TITA_M2_READ"},
     {"id": 7, "name": "Tank 1 Motor Channel",   "write_api_key": "TANK1_M_WRITE",          "read_api_key": "TANK1_M_READ"},
+    {"id": 8, "name": "Mafia Game Sync",       "write_api_key": "MAFIA_WRITE_KEY",        "read_api_key": "MAFIA_READ_KEY"},
 ]
 
 @app.on_event("startup")
@@ -183,6 +184,11 @@ def update_channel(
                 except: db.rollback(); channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
             elif api_key == "TANK1_M_WRITE":
                 channel = models.Channel(id=7, name="Tank 1 Motor Channel", write_api_key="TANK1_M_WRITE", read_api_key="TANK1_M_READ")
+                db.add(channel)
+                try: db.commit(); db.refresh(channel)
+                except: db.rollback(); channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
+            elif api_key == "MAFIA_WRITE_KEY":
+                channel = models.Channel(id=8, name="Mafia Game Sync", write_api_key="MAFIA_WRITE_KEY", read_api_key="MAFIA_READ_KEY")
                 db.add(channel)
                 try: db.commit(); db.refresh(channel)
                 except: db.rollback(); channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
@@ -347,9 +353,60 @@ def read_last_field(
     if not feed:
         return "-1"
         
-    # Get the specific field
-    field_value = getattr(feed, f"field{field_id}")
-    if field_value is None:
-        return "-1"
-        
     return str(field_value)
+
+# ==========================================
+# CLOUD OVER-THE-AIR (OTA) FIRMWARE SERVER
+# ==========================================
+import os
+from fastapi import UploadFile, File
+from fastapi.responses import FileResponse
+
+FIRMWARE_DIR = "firmware"
+os.makedirs(FIRMWARE_DIR, exist_ok=True)
+
+@app.get("/ota", response_class=HTMLResponse, tags=["Cloud OTA"])
+def ota_dashboard():
+    files = os.listdir(FIRMWARE_DIR)
+    file_list = "".join([f"<li><b>{f}</b> ({os.path.getsize(os.path.join(FIRMWARE_DIR, f)) // 1024} KB) - <a href='/ota/firmware/{f}'>Download</a></li>" for f in files]) or "<li>No firmware uploaded yet.</li>"
+    return f"""
+    <html>
+    <head><title>Cloud OTA Firmware Manager</title><style>body{{font-family:sans-serif; padding:30px; background:#0f172a; color:#f8fafc;}} .card{{background:#1e293b; padding:25px; border-radius:12px; max-width:600px; margin-bottom:20px;}} input, select, button{{padding:10px; margin:8px 0; border-radius:6px; border:none; width:100%; box-sizing:border-box;}} button{{background:#06b6d4; color:white; font-weight:bold; cursor:pointer;}}</style></head>
+    <body>
+        <h1>🚀 Cloud OTA Firmware Server</h1>
+        <div class="card">
+            <h3>Upload New Firmware (.bin)</h3>
+            <form action="/ota/upload" method="post" enctype="multipart/form-data">
+                <label>Target Device:</label>
+                <select name="device_type">
+                    <option value="roof_esp">Roof 3 Tanks ESP (roof_esp.bin)</option>
+                    <option value="dual_motor">Dual Motor ESP (dual_motor.bin)</option>
+                </select>
+                <br>
+                <label>Compiled Binary (.bin file):</label>
+                <input type="file" name="file" accept=".bin" required>
+                <button type="submit">Upload & Deploy Worldwide</button>
+            </form>
+        </div>
+        <div class="card">
+            <h3>Active Firmware Files:</h3>
+            <ul>{file_list}</ul>
+        </div>
+    </body>
+    </html>
+    """
+
+@app.post("/ota/upload", tags=["Cloud OTA"])
+async def upload_firmware(device_type: str = Query(...), file: UploadFile = File(...)):
+    filename = f"{device_type}.bin"
+    path = os.path.join(FIRMWARE_DIR, filename)
+    with open(path, "wb") as f:
+        f.write(await file.read())
+    return HTMLResponse(f"<h3>✅ Successfully uploaded {filename}! Any ESP asking for update will now download this version.</h3><a href='/ota'>Back to OTA Dashboard</a>")
+
+@app.get("/ota/firmware/{filename}", tags=["Cloud OTA"])
+def download_firmware(filename: str):
+    path = os.path.join(FIRMWARE_DIR, filename)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Firmware binary not found")
+    return FileResponse(path, media_type="application/octet-stream", filename=filename)
