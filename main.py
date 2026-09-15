@@ -22,7 +22,7 @@ app = FastAPI(title="Smart Water Backend (ThingSpeak Clone)")
 def web_dashboard(db: Session = Depends(get_db)):
     channels = db.query(models.Channel).all()
     html = '<html><head><title>Smart Water Dashboard</title><style>body{font-family:sans-serif; padding:20px; background:#f4f4f9;} .card{background:white; padding:20px; margin-bottom:15px; border-radius:8px; box-shadow:0 2px 5px rgba(0,0,0,0.1);}</style></head><body>'
-    html += '<h1>💧 Smart Water Web Dashboard</h1>'
+    html += '<h1>ðŸ’§ Smart Water Web Dashboard</h1>'
     if not channels:
         html += '<p>No channels found in database.</p>'
     for c in channels:
@@ -34,7 +34,7 @@ def web_dashboard(db: Session = Depends(get_db)):
     html += '</body></html>'
     return html
 
-# ── Seed known channels on startup so reads never 404 after a fresh deploy ──
+# â”€â”€ Seed known channels on startup so reads never 404 after a fresh deploy â”€â”€
 _SEED_CHANNELS = [
     {"id": 2, "name": "Smart Water Channel",  "write_api_key": "IPwXiTFSujeNNWd2HAMRfg", "read_api_key": "v_9jxuU6dHmXxNUsCdcERA"},
     {"id": 3, "name": "Tank 3 Motor Channel", "write_api_key": "MOTOR_WRITE_KEY",        "read_api_key": "MOTOR_READ_KEY"},
@@ -55,10 +55,10 @@ def seed_channels():
             if not exists:
                 db.add(models.Channel(**ch))
         db.commit()
-        print(f"✅ Seeded {len(_SEED_CHANNELS)} channels (skipped existing)")
+        print(f"âœ… Seeded {len(_SEED_CHANNELS)} channels (skipped existing)")
     except Exception as e:
         db.rollback()
-        print(f"⚠️ Channel seeding error: {e}")
+        print(f"âš ï¸ Channel seeding error: {e}")
     finally:
         db.close()
 
@@ -123,8 +123,8 @@ def send_email_alarm(target_email, tank_name, percentage):
         return
         
     msg = EmailMessage()
-    msg.set_content(f"⚠️ URGENT ALARM: {tank_name} water level is critically low! (Currently at {percentage}%)\n\nPlease turn on the pump.")
-    msg['Subject'] = f"🚨 Water Alarm: {tank_name} is Low!"
+    msg.set_content(f"âš ï¸ URGENT ALARM: {tank_name} water level is critically low! (Currently at {percentage}%)\n\nPlease turn on the pump.")
+    msg['Subject'] = f"ðŸš¨ Water Alarm: {tank_name} is Low!"
     msg['From'] = GMAIL_SENDER
     msg['To'] = target_email
 
@@ -352,61 +352,9 @@ def read_last_field(
              
     if not feed:
         return "-1"
-        
+
+    field_value = getattr(feed, f"field{field_id}")
+    if field_value is None:
+        return "-1"
     return str(field_value)
 
-# ==========================================
-# CLOUD OVER-THE-AIR (OTA) FIRMWARE SERVER
-# ==========================================
-import os
-from fastapi import UploadFile, File, Form
-from fastapi.responses import FileResponse
-
-FIRMWARE_DIR = "firmware"
-os.makedirs(FIRMWARE_DIR, exist_ok=True)
-
-@app.get("/ota", response_class=HTMLResponse, tags=["Cloud OTA"])
-def ota_dashboard():
-    files = os.listdir(FIRMWARE_DIR)
-    file_list = "".join([f"<li><b>{f}</b> ({os.path.getsize(os.path.join(FIRMWARE_DIR, f)) // 1024} KB) - <a href='/ota/firmware/{f}'>Download</a></li>" for f in files]) or "<li>No firmware uploaded yet.</li>"
-    return f"""
-    <html>
-    <head><title>Cloud OTA Firmware Manager</title><style>body{{font-family:sans-serif; padding:30px; background:#0f172a; color:#f8fafc;}} .card{{background:#1e293b; padding:25px; border-radius:12px; max-width:600px; margin-bottom:20px;}} input, select, button{{padding:10px; margin:8px 0; border-radius:6px; border:none; width:100%; box-sizing:border-box;}} button{{background:#06b6d4; color:white; font-weight:bold; cursor:pointer;}}</style></head>
-    <body>
-        <h1>🚀 Cloud OTA Firmware Server</h1>
-        <div class="card">
-            <h3>Upload New Firmware (.bin)</h3>
-            <form action="/ota/upload" method="post" enctype="multipart/form-data">
-                <label>Target Device:</label>
-                <select name="device_type">
-                    <option value="roof_esp">Roof 3 Tanks ESP (roof_esp.bin)</option>
-                    <option value="dual_motor">Dual Motor ESP (dual_motor.bin)</option>
-                </select>
-                <br>
-                <label>Compiled Binary (.bin file):</label>
-                <input type="file" name="file" accept=".bin" required>
-                <button type="submit">Upload & Deploy Worldwide</button>
-            </form>
-        </div>
-        <div class="card">
-            <h3>Active Firmware Files:</h3>
-            <ul>{file_list}</ul>
-        </div>
-    </body>
-    </html>
-    """
-
-@app.post("/ota/upload", tags=["Cloud OTA"])
-async def upload_firmware(device_type: str = Form(...), file: UploadFile = File(...)):
-    filename = f"{device_type}.bin"
-    path = os.path.join(FIRMWARE_DIR, filename)
-    with open(path, "wb") as f:
-        f.write(await file.read())
-    return HTMLResponse(f"<h3>✅ Successfully uploaded {filename}! Any ESP asking for update will now download this version.</h3><a href='/ota'>Back to OTA Dashboard</a>")
-
-@app.get("/ota/firmware/{filename}", tags=["Cloud OTA"])
-def download_firmware(filename: str):
-    path = os.path.join(FIRMWARE_DIR, filename)
-    if not os.path.exists(path):
-        raise HTTPException(status_code=404, detail="Firmware binary not found")
-    return FileResponse(path, media_type="application/octet-stream", filename=filename)
