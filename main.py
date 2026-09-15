@@ -359,7 +359,7 @@ def read_last_field(
 # CLOUD OVER-THE-AIR (OTA) FIRMWARE SERVER
 # ==========================================
 import os
-from fastapi import UploadFile, File
+from fastapi import UploadFile, File, Form
 from fastapi.responses import FileResponse
 
 FIRMWARE_DIR = "firmware"
@@ -397,7 +397,7 @@ def ota_dashboard():
     """
 
 @app.post("/ota/upload", tags=["Cloud OTA"])
-async def upload_firmware(device_type: str = Query(...), file: UploadFile = File(...)):
+async def upload_firmware(device_type: str = Form(...), file: UploadFile = File(...)):
     filename = f"{device_type}.bin"
     path = os.path.join(FIRMWARE_DIR, filename)
     with open(path, "wb") as f:
