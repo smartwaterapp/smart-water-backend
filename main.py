@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi import FastAPI, Depends, HTTPException, Query, Form as FastForm
 from sqlalchemy.orm import Session
 from typing import Optional, List
 import models
@@ -14,27 +14,63 @@ import json
 models.Base.metadata.create_all(bind=engine)
 
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 app = FastAPI(title="Smart Water Backend (ThingSpeak Clone)")
 
 @app.get('/', response_class=HTMLResponse, tags=['Dashboard'])
 def web_dashboard(db: Session = Depends(get_db)):
     channels = db.query(models.Channel).all()
-    html = '<html><head><title>Smart Water Dashboard</title><style>body{font-family:sans-serif; padding:20px; background:#f4f4f9;} .card{background:white; padding:20px; margin-bottom:15px; border-radius:8px; box-shadow:0 2px 5px rgba(0,0,0,0.1);}</style></head><body>'
-    html += '<h1>ðŸ’§ Smart Water Web Dashboard</h1>'
+    html = """<html><head><title>Smart Water Dashboard</title>
+<style>body{font-family:sans-serif;padding:20px;background:#f4f4f9;}
+.card{background:white;padding:20px;margin-bottom:15px;border-radius:8px;box-shadow:0 2px 5px rgba(0,0,0,0.1);}
+input,button{padding:8px 12px;margin:4px;border-radius:4px;border:1px solid #ccc;}
+button{background:#4CAF50;color:white;border:none;cursor:pointer;}
+.form-card{background:#e8f5e9;padding:20px;margin-bottom:20px;border-radius:8px;}
+label{font-weight:bold;margin-right:8px;}</style></head><body>
+<h1>Smart Water Web Dashboard</h1>
+<div class="form-card"><h2>Create New Channel</h2>
+<form method="POST" action="/channels/create">
+<label>Name:</label><input type="text" name="name" required placeholder="My Channel"><br>
+<label>ID (optional):</label><input type="number" name="id" placeholder="Auto"><br>
+<label>Write Key (optional):</label><input type="text" name="write_api_key" placeholder="Auto"><br>
+<label>Read Key (optional):</label><input type="text" name="read_api_key" placeholder="Auto"><br>
+<button type="submit">Create Channel</button>
+</form></div>"""
     if not channels:
-        html += '<p>No channels found in database.</p>'
+        html += '<p>No channels found.</p>'
     for c in channels:
         html += f'<div class="card"><h2>{c.name} (ID: {c.id})</h2>'
-        html += f'<p><b>Read API Key:</b> {c.read_api_key}</p>'
-        html += f'<p><b>Write API Key:</b> {c.write_api_key}</p>'
-        html += f'<a href="/channels/{c.id}/feeds.json?api_key={c.read_api_key}&results=5" target="_blank">View Recent Data (JSON)</a>'
-        html += '</div>'
+        html += f'<p><b>Read Key:</b> {c.read_api_key}</p>'
+        html += f'<p><b>Write Key:</b> {c.write_api_key}</p>'
+        html += f'<a href="/channels/{c.id}/feeds.json?api_key={c.read_api_key}&results=5" target="_blank">View Data</a></div>'
     html += '</body></html>'
     return html
 
-# â”€â”€ Seed known channels on startup so reads never 404 after a fresh deploy â”€â”€
+@app.post('/channels/create', tags=['Management'])
+def create_channel_form(
+    name: str = FastForm(...),
+    id: Optional[int] = FastForm(None),
+    write_api_key: Optional[str] = FastForm(None),
+    read_api_key: Optional[str] = FastForm(None),
+    db: Session = Depends(get_db)
+):
+    kwargs = {"name": name}
+    if id is not None and id > 0:
+        existing = db.query(models.Channel).filter(models.Channel.id == id).first()
+        if existing:
+            return HTMLResponse(f"<h2>Error: Channel {id} already exists!</h2><a href='/'>Go Back</a>", status_code=409)
+        kwargs["id"] = id
+    if write_api_key and write_api_key.strip():
+        kwargs["write_api_key"] = write_api_key.strip()
+    if read_api_key and read_api_key.strip():
+        kwargs["read_api_key"] = read_api_key.strip()
+    db_channel = models.Channel(**kwargs)
+    db.add(db_channel)
+    db.commit()
+    return RedirectResponse(url="/", status_code=303)
+
+# -- Seed known channels on startup so reads never 404 after a fresh deploy --
 _SEED_CHANNELS = [
     {"id": 2, "name": "Smart Water Channel",  "write_api_key": "IPwXiTFSujeNNWd2HAMRfg", "read_api_key": "v_9jxuU6dHmXxNUsCdcERA"},
     {"id": 3, "name": "Tank 3 Motor Channel", "write_api_key": "MOTOR_WRITE_KEY",        "read_api_key": "MOTOR_READ_KEY"},
@@ -55,10 +91,10 @@ def seed_channels():
             if not exists:
                 db.add(models.Channel(**ch))
         db.commit()
-        print(f"âœ… Seeded {len(_SEED_CHANNELS)} channels (skipped existing)")
+        print(f"Seeded {len(_SEED_CHANNELS)} channels (skipped existing)")
     except Exception as e:
         db.rollback()
-        print(f"âš ï¸ Channel seeding error: {e}")
+        print(f"Channel seeding error: {e}")
     finally:
         db.close()
 
@@ -74,6 +110,9 @@ app.add_middleware(
 class ChannelCreate(BaseModel):
     name: str
     description: Optional[str] = None
+    id: Optional[int] = None
+    write_api_key: Optional[str] = None
+    read_api_key: Optional[str] = None
 
 class FeedResponse(BaseModel):
     created_at: datetime
@@ -93,7 +132,17 @@ class FeedResponse(BaseModel):
 # --- Management Endpoints ---
 @app.post("/channels", tags=["Management"])
 def create_channel(channel: ChannelCreate, db: Session = Depends(get_db)):
-    db_channel = models.Channel(name=channel.name, description=channel.description)
+    kwargs = {"name": channel.name, "description": channel.description}
+    if channel.id is not None:
+        existing = db.query(models.Channel).filter(models.Channel.id == channel.id).first()
+        if existing:
+            raise HTTPException(status_code=409, detail=f"Channel {channel.id} already exists")
+        kwargs["id"] = channel.id
+    if channel.write_api_key:
+        kwargs["write_api_key"] = channel.write_api_key
+    if channel.read_api_key:
+        kwargs["read_api_key"] = channel.read_api_key
+    db_channel = models.Channel(**kwargs)
     db.add(db_channel)
     db.commit()
     db.refresh(db_channel)
@@ -112,7 +161,6 @@ from email.message import EmailMessage
 last_alarm_time = {"tank1": 0, "tank3": 0}
 
 # ===== GMAIL CONFIGURATION =====
-# You MUST put your Gmail and App Password here before uploading to GitHub!
 GMAIL_SENDER = "the.smart.water.app@gmail.com"
 GMAIL_APP_PASSWORD = "lhdmvbptobgzjapa"
 
@@ -123,8 +171,8 @@ def send_email_alarm(target_email, tank_name, percentage):
         return
         
     msg = EmailMessage()
-    msg.set_content(f"âš ï¸ URGENT ALARM: {tank_name} water level is critically low! (Currently at {percentage}%)\n\nPlease turn on the pump.")
-    msg['Subject'] = f"ðŸš¨ Water Alarm: {tank_name} is Low!"
+    msg.set_content(f"URGENT ALARM: {tank_name} water level is critically low! (Currently at {percentage}%)\n\nPlease turn on the pump.")
+    msg['Subject'] = f"Water Alarm: {tank_name} is Low!"
     msg['From'] = GMAIL_SENDER
     msg['To'] = target_email
 
@@ -235,12 +283,12 @@ def update_channel(
                     except: pass
 
             if target_email != "none":
-                import datetime
+                import datetime as dt_module
                 if field1 is not None:
                     try:
                         pct1 = float(field1)
                         if pct1 < threshold:
-                            now = datetime.datetime.utcnow()
+                            now = dt_module.datetime.utcnow()
                             last = last_alarm_time.get("tank1")
                             if not last or (now - last).total_seconds() > 3600:
                                 send_email_alarm(target_email, "Tank 1", pct1)
@@ -250,7 +298,7 @@ def update_channel(
                     try:
                         pct3 = float(field3)
                         if pct3 < threshold:
-                            now = datetime.datetime.utcnow()
+                            now = dt_module.datetime.utcnow()
                             last = last_alarm_time.get("tank3")
                             if not last or (now - last).total_seconds() > 3600:
                                 send_email_alarm(target_email, "Tank 3", pct3)
@@ -290,8 +338,8 @@ def read_feeds(
     query = db.query(models.Feed).filter(models.Feed.channel_id == channel.id)
     
     if minutes is not None and minutes > 0:
-        import datetime
-        cutoff = datetime.datetime.utcnow() - datetime.timedelta(minutes=minutes)
+        import datetime as dt_module
+        cutoff = dt_module.datetime.utcnow() - dt_module.timedelta(minutes=minutes)
         query = query.filter(models.Feed.created_at >= cutoff)
         feeds = query.order_by(models.Feed.created_at.asc()).all()
     else:
@@ -325,7 +373,7 @@ def read_feeds(
                 "field6": feed.field6,
                 "field7": feed.field7,
                 "field8": feed.field8,
-            } for feed in reversed(feeds)
+            } for feed in feeds
         ]
     }
     return response
@@ -357,4 +405,3 @@ def read_last_field(
     if field_value is None:
         return "-1"
     return str(field_value)
-
