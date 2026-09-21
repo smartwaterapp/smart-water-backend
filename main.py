@@ -22,14 +22,21 @@ app = FastAPI(title="Smart Water Backend (ThingSpeak Clone)")
 def web_dashboard(db: Session = Depends(get_db)):
     channels = db.query(models.Channel).all()
     html = """<html><head><title>Smart Water Dashboard</title>
-<style>body{font-family:sans-serif;padding:20px;background:#f4f4f9;}
-.card{background:white;padding:20px;margin-bottom:15px;border-radius:8px;box-shadow:0 2px 5px rgba(0,0,0,0.1);}
+<style>
+body{font-family:sans-serif;padding:20px;background:#f4f4f9;}
+.card{background:white;padding:20px;margin-bottom:15px;border-radius:8px;box-shadow:0 2px 5px rgba(0,0,0,0.1);position:relative;}
 input,button{padding:8px 12px;margin:4px;border-radius:4px;border:1px solid #ccc;}
 button{background:#4CAF50;color:white;border:none;cursor:pointer;}
+.btn-delete{background:#e53935;color:white;border:none;cursor:pointer;padding:8px 14px;border-radius:4px;font-weight:bold;}
+.btn-delete:hover{background:#b71c1c;}
+.btn-clear{background:#fb8c00;color:white;border:none;cursor:pointer;padding:8px 14px;border-radius:4px;font-weight:bold;}
+.btn-clear:hover{background:#e65100;}
+.actions-row{display:flex;gap:10px;align-items:center;margin-top:10px;}
 .form-card{background:#e8f5e9;padding:20px;margin-bottom:20px;border-radius:8px;}
-label{font-weight:bold;margin-right:8px;}</style></head><body>
-<h1>Smart Water Web Dashboard</h1>
-<div class="form-card"><h2>Create New Channel</h2>
+label{font-weight:bold;margin-right:8px;}
+</style></head><body>
+<h1>💧 Smart Water Web Dashboard</h1>
+<div class="form-card"><h2>➕ Create New Channel</h2>
 <form method="POST" action="/channels/create">
 <label>Name:</label><input type="text" name="name" required placeholder="My Channel"><br>
 <label>ID (optional):</label><input type="number" name="id" placeholder="Auto"><br>
@@ -40,10 +47,18 @@ label{font-weight:bold;margin-right:8px;}</style></head><body>
     if not channels:
         html += '<p>No channels found.</p>'
     for c in channels:
+        feed_count = db.query(models.Feed).filter(models.Feed.channel_id == c.id).count()
         html += f'<div class="card"><h2>{c.name} (ID: {c.id})</h2>'
-        html += f'<p><b>Read Key:</b> {c.read_api_key}</p>'
-        html += f'<p><b>Write Key:</b> {c.write_api_key}</p>'
-        html += f'<a href="/channels/{c.id}/feeds.json?api_key={c.read_api_key}&results=5" target="_blank">View Data</a></div>'
+        html += f'<p><b>Read Key:</b> <code>{c.read_api_key}</code></p>'
+        html += f'<p><b>Write Key:</b> <code>{c.write_api_key}</code></p>'
+        html += f'<p><b>Total Feeds:</b> {feed_count}</p>'
+        html += f'<a href="/channels/{c.id}/feeds.json?api_key={c.read_api_key}&results=5" target="_blank">View Data (JSON)</a>'
+        html += '<div class="actions-row">'
+        html += f'<form method="POST" action="/channels/{c.id}/clear" onsubmit="return confirm(\'Are you sure you want to clear all feed data for {c.name} (ID: {c.id})?\');" style="display:inline;">'
+        html += '<button type="submit" class="btn-clear">🧹 Clear Data</button></form>'
+        html += f'<form method="POST" action="/channels/{c.id}/delete" onsubmit="return confirm(\'Are you sure you want to completely DELETE channel {c.name} (ID: {c.id}) and all its data?\');" style="display:inline;">'
+        html += '<button type="submit" class="btn-delete">🗑️ Delete Channel</button></form>'
+        html += '</div></div>'
     html += '</body></html>'
     return html
 
@@ -69,6 +84,31 @@ def create_channel_form(
     db.add(db_channel)
     db.commit()
     return RedirectResponse(url="/", status_code=303)
+
+@app.post('/channels/{channel_id}/delete', tags=['Management'])
+def delete_channel_form(channel_id: int, db: Session = Depends(get_db)):
+    db.query(models.Feed).filter(models.Feed.channel_id == channel_id).delete()
+    channel = db.query(models.Channel).filter(models.Channel.id == channel_id).first()
+    if channel:
+        db.delete(channel)
+        db.commit()
+    return RedirectResponse(url="/", status_code=303)
+
+@app.post('/channels/{channel_id}/clear', tags=['Management'])
+def clear_channel_feeds(channel_id: int, db: Session = Depends(get_db)):
+    db.query(models.Feed).filter(models.Feed.channel_id == channel_id).delete()
+    db.commit()
+    return RedirectResponse(url="/", status_code=303)
+
+@app.delete('/channels/{channel_id}', tags=['Management'])
+def delete_channel_api(channel_id: int, db: Session = Depends(get_db)):
+    channel = db.query(models.Channel).filter(models.Channel.id == channel_id).first()
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+    db.query(models.Feed).filter(models.Feed.channel_id == channel_id).delete()
+    db.delete(channel)
+    db.commit()
+    return {"message": f"Channel {channel_id} deleted successfully"}
 
 # -- Seed known channels on startup so reads never 404 after a fresh deploy --
 _SEED_CHANNELS = [
