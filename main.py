@@ -157,8 +157,12 @@ def startup_init():
             exists = db.query(models.Channel).filter(models.Channel.id == ch["id"]).first()
             if not exists:
                 db.add(models.Channel(**ch))
+            else:
+                exists.name = ch["name"]
+                exists.write_api_key = ch["write_api_key"]
+                exists.read_api_key = ch["read_api_key"]
         db.commit()
-        print(f"Seeded {len(_SEED_CHANNELS)} channels (skipped existing)")
+        print(f"Seeded/Updated {len(_SEED_CHANNELS)} channels")
         # Run cleanup on startup
         cleanup_old_feeds(db, max_age_days=2)
     except Exception as e:
@@ -271,10 +275,19 @@ def update_channel(
         channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
         if not channel:
             if api_key == "yousvin8":
-                channel = models.Channel(id=1, name="yousvin8 tank", write_api_key="yousvin8", read_api_key="elias gg")
-                db.add(channel)
-                try: db.commit(); db.refresh(channel)
-                except: db.rollback(); channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
+                ch1 = db.query(models.Channel).filter(models.Channel.id == 1).first()
+                if ch1:
+                    ch1.write_api_key = "yousvin8"
+                    ch1.read_api_key = "elias gg"
+                    ch1.name = "yousvin8 tank"
+                    db.commit()
+                    db.refresh(ch1)
+                    channel = ch1
+                else:
+                    channel = models.Channel(id=1, name="yousvin8 tank", write_api_key="yousvin8", read_api_key="elias gg")
+                    db.add(channel)
+                    try: db.commit(); db.refresh(channel)
+                    except: db.rollback(); channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
             elif api_key == "IPwXiTFSujeNNWd2HAMRfg":
                 channel = models.Channel(id=2, name="Smart Water Channel", write_api_key="IPwXiTFSujeNNWd2HAMRfg", read_api_key="v_9jxuU6dHmXxNUsCdcERA")
                 db.add(channel)
@@ -409,6 +422,13 @@ def read_feeds(
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
         
+    # Auto-repair channel 1 keys if accessed with 'elias gg'
+    if channel.id == 1 and api_key == "elias gg" and channel.read_api_key != "elias gg":
+        channel.read_api_key = "elias gg"
+        channel.write_api_key = "yousvin8"
+        channel.name = "yousvin8 tank"
+        db.commit()
+
     if channel.read_api_key != api_key:
         raise HTTPException(status_code=403, detail="Invalid Read API Key")
 
