@@ -121,8 +121,34 @@ _SEED_CHANNELS = [
     {"id": 8, "name": "Mafia Game Sync",       "write_api_key": "MAFIA_WRITE_KEY",        "read_api_key": "MAFIA_READ_KEY"},
 ]
 
+def cleanup_old_feeds(db: Session, max_age_days: int = 2):
+    """
+    Deletes feeds in all channels where created_at is older than `max_age_days` (default 2 days).
+    Always retains the single latest feed for every channel so tanks always retain their current state.
+    """
+    try:
+        from datetime import datetime, timedelta
+        cutoff = datetime.utcnow() - timedelta(days=max_age_days)
+        # Find all distinct channels with feeds older than cutoff
+        channels = db.query(models.Channel).all()
+        for ch in channels:
+            latest = db.query(models.Feed).filter(models.Feed.channel_id == ch.id)\
+                       .order_by(models.Feed.created_at.desc()).first()
+            query = db.query(models.Feed).filter(
+                models.Feed.channel_id == ch.id,
+                models.Feed.created_at < cutoff
+            )
+            # Make sure we never delete the latest reading even if inactive
+            if latest:
+                query = query.filter(models.Feed.id != latest.id)
+            deleted_count = query.delete(synchronize_session=False)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"Cleanup error: {e}")
+
 @app.on_event("startup")
-def seed_channels():
+def startup_init():
     from database import SessionLocal
     db = SessionLocal()
     try:
@@ -132,9 +158,11 @@ def seed_channels():
                 db.add(models.Channel(**ch))
         db.commit()
         print(f"Seeded {len(_SEED_CHANNELS)} channels (skipped existing)")
+        # Run cleanup on startup
+        cleanup_old_feeds(db, max_age_days=2)
     except Exception as e:
         db.rollback()
-        print(f"Channel seeding error: {e}")
+        print(f"Startup initialization error: {e}")
     finally:
         db.close()
 
@@ -345,6 +373,9 @@ def update_channel(
                                 last_alarm_time["tank3"] = now
                     except: pass
 
+        # Clean up records older than 2 days automatically
+        cleanup_old_feeds(db, max_age_days=2)
+
         entry_count = db.query(models.Feed).filter(models.Feed.channel_id == channel.id).count()
         return entry_count
         
@@ -374,6 +405,9 @@ def read_feeds(
         
     if channel.read_api_key != api_key:
         raise HTTPException(status_code=403, detail="Invalid Read API Key")
+
+    # Clean up data older than 2 days automatically on read
+    cleanup_old_feeds(db, max_age_days=2)
 
     query = db.query(models.Feed).filter(models.Feed.channel_id == channel.id)
     
