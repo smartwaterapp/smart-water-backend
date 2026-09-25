@@ -112,6 +112,7 @@ def delete_channel_api(channel_id: int, db: Session = Depends(get_db)):
 
 # -- Seed known channels on startup so reads never 404 after a fresh deploy --
 _SEED_CHANNELS = [
+    {"id": 1, "name": "yousvin8 tank",         "write_api_key": "yousvin8",                "read_api_key": "elias gg"},
     {"id": 2, "name": "Smart Water Channel",  "write_api_key": "IPwXiTFSujeNNWd2HAMRfg", "read_api_key": "v_9jxuU6dHmXxNUsCdcERA"},
     {"id": 3, "name": "Tank 3 Motor Channel", "write_api_key": "MOTOR_WRITE_KEY",        "read_api_key": "MOTOR_READ_KEY"},
     {"id": 4, "name": "Tita Main Tanks",       "write_api_key": "TITA_WRITE_KEY",         "read_api_key": "TITA_READ_KEY"},
@@ -269,7 +270,12 @@ def update_channel(
     try:
         channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
         if not channel:
-            if api_key == "IPwXiTFSujeNNWd2HAMRfg":
+            if api_key == "yousvin8":
+                channel = models.Channel(id=1, name="yousvin8 tank", write_api_key="yousvin8", read_api_key="elias gg")
+                db.add(channel)
+                try: db.commit(); db.refresh(channel)
+                except: db.rollback(); channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
+            elif api_key == "IPwXiTFSujeNNWd2HAMRfg":
                 channel = models.Channel(id=2, name="Smart Water Channel", write_api_key="IPwXiTFSujeNNWd2HAMRfg", read_api_key="v_9jxuU6dHmXxNUsCdcERA")
                 db.add(channel)
                 try:
