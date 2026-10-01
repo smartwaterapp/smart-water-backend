@@ -12,6 +12,11 @@ import json
 
 # Create database tables
 models.Base.metadata.create_all(bind=engine)
+try:
+    import whatsapp_models
+    whatsapp_models.Base.metadata.create_all(bind=engine)
+except Exception as e:
+    print(f"WhatsApp tables init notice: {e}")
 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -505,3 +510,84 @@ def read_last_field(
     if field_value is None:
         return "-1"
     return str(field_value)
+
+
+# ==========================================
+# 🚀 PyezPulse WhatsApp Gateway Endpoints
+# ==========================================
+
+class WhatsAppSendRequest(BaseModel):
+    to: str
+    message: str
+    api_key: Optional[str] = "pyezpulse_master_key"
+    instance_id: Optional[str] = "instance193050"
+    token: Optional[str] = "k29fx1k2eaq5wlcx"
+
+@app.get("/api/whatsapp/quota", tags=["WhatsApp"])
+def get_whatsapp_quota(api_key: str = "pyezpulse_master_key", db: Session = Depends(get_db)):
+    import whatsapp_service
+    user = whatsapp_service.get_or_create_default_user(db)
+    return {
+        "status": "success",
+        "username": user.username,
+        "plan": user.plan_name,
+        "messages_sent": user.messages_sent,
+        "monthly_limit": user.monthly_limit,
+        "messages_remaining": max(0, user.monthly_limit - user.messages_sent),
+        "is_active": user.is_active
+    }
+
+@app.post("/api/whatsapp/send", tags=["WhatsApp"])
+def send_whatsapp_message(req: WhatsAppSendRequest, db: Session = Depends(get_db)):
+    import whatsapp_service
+    from whatsapp_models import WhatsAppMessageLog
+
+    user = whatsapp_service.get_or_create_default_user(db)
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Subscription is inactive or suspended.")
+
+    if user.messages_sent >= user.monthly_limit:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Monthly limit of {user.monthly_limit} messages reached! Please upgrade your plan."
+        )
+
+    try:
+        dispatch_res = whatsapp_service.dispatch_whatsapp_message(
+            to_number=req.to,
+            message_text=req.message,
+            instance_id=req.instance_id,
+            token=req.token
+        )
+        # Increment counter & save log
+        user.messages_sent += 1
+        log_entry = WhatsAppMessageLog(
+            user_id=user.id,
+            recipient=req.to,
+            message=req.message,
+            status="sent"
+        )
+        db.add(log_entry)
+        db.commit()
+
+        return {
+            "status": "success",
+            "gateway_response": dispatch_res,
+            "messages_sent": user.messages_sent,
+            "messages_remaining": max(0, user.monthly_limit - user.messages_sent)
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"WhatsApp Dispatch Error: {str(e)}")
+
+@app.get("/api/whatsapp/logs", tags=["WhatsApp"])
+def get_whatsapp_logs(limit: int = 50, db: Session = Depends(get_db)):
+    from whatsapp_models import WhatsAppMessageLog
+    logs = db.query(WhatsAppMessageLog).order_by(WhatsAppMessageLog.created_at.desc()).limit(limit).all()
+    return [{
+        "id": l.id,
+        "recipient": l.recipient,
+        "message": l.message,
+        "status": l.status,
+        "created_at": l.created_at.isoformat() + "Z" if l.created_at else None
+    } for l in logs]
