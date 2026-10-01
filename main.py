@@ -125,6 +125,8 @@ _SEED_CHANNELS = [
     {"id": 6, "name": "Tita Motor 2",          "write_api_key": "TITA_M2_WRITE",          "read_api_key": "TITA_M2_READ"},
     {"id": 7, "name": "Tank 1 Motor Channel",   "write_api_key": "TANK1_M_WRITE",          "read_api_key": "TANK1_M_READ"},
     {"id": 8, "name": "Mafia Game Sync",       "write_api_key": "MAFIA_WRITE_KEY",        "read_api_key": "MAFIA_READ_KEY"},
+    {"id": 9, "name": "Pyezpulse",             "write_api_key": "pyez",                    "read_api_key": "pulse"},
+    {"id": 123456, "name": "scool bell",        "write_api_key": "write",                   "read_api_key": "read"},
 ]
 
 def cleanup_old_feeds(db: Session, max_age_days: int = 2):
@@ -329,6 +331,15 @@ def update_channel(
                 except: db.rollback(); channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
             elif api_key == "MAFIA_WRITE_KEY":
                 channel = models.Channel(id=8, name="Mafia Game Sync", write_api_key="MAFIA_WRITE_KEY", read_api_key="MAFIA_READ_KEY")
+                db.add(channel)
+                try: db.commit(); db.refresh(channel)
+            elif api_key == "pyez":
+                channel = models.Channel(id=9, name="Pyezpulse", write_api_key="pyez", read_api_key="pulse")
+                db.add(channel)
+                try: db.commit(); db.refresh(channel)
+                except: db.rollback(); channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
+            elif api_key == "write":
+                channel = models.Channel(id=123456, name="scool bell", write_api_key="write", read_api_key="read")
                 db.add(channel)
                 try: db.commit(); db.refresh(channel)
                 except: db.rollback(); channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
