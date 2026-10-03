@@ -535,16 +535,18 @@ class WhatsAppSendRequest(BaseModel):
     token: Optional[str] = "k29fx1k2eaq5wlcx"
 
 @app.get("/api/whatsapp/quota", tags=["WhatsApp"])
-def get_whatsapp_quota(api_key: str = "pyezpulse_master_key", db: Session = Depends(get_db)):
+def get_whatsapp_quota(api_key: str = "pyez", db: Session = Depends(get_db)):
     import whatsapp_service
-    user = whatsapp_service.get_or_create_default_user(db)
+    user = whatsapp_service.get_or_create_default_user(db, api_key=api_key)
     return {
         "status": "success",
         "username": user.username,
         "plan": user.plan_name,
-        "messages_sent": user.messages_sent,
-        "monthly_limit": user.monthly_limit,
-        "messages_remaining": max(0, user.monthly_limit - user.messages_sent),
+        "daily_limit": user.daily_limit,
+        "daily_sent": user.daily_sent,
+        "daily_remaining": max(0, user.daily_limit - user.daily_sent),
+        "last_reset_date": user.last_reset_date,
+        "total_messages_sent": user.messages_sent,
         "is_active": user.is_active
     }
 
@@ -553,14 +555,14 @@ def send_whatsapp_message(req: WhatsAppSendRequest, db: Session = Depends(get_db
     import whatsapp_service
     from whatsapp_models import WhatsAppMessageLog
 
-    user = whatsapp_service.get_or_create_default_user(db)
+    user = whatsapp_service.get_or_create_default_user(db, api_key=req.api_key or "pyez")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Subscription is inactive or suspended.")
 
-    if user.messages_sent >= user.monthly_limit:
+    if user.daily_sent >= user.daily_limit:
         raise HTTPException(
             status_code=429,
-            detail=f"Monthly limit of {user.monthly_limit} messages reached! Please upgrade your plan."
+            detail=f"Daily limit of {user.daily_limit} messages reached for today! It will automatically reset tomorrow."
         )
 
     try:
@@ -570,7 +572,8 @@ def send_whatsapp_message(req: WhatsAppSendRequest, db: Session = Depends(get_db
             instance_id=req.instance_id,
             token=req.token
         )
-        # Increment counter & save log
+        # Increment daily counter & total sent
+        user.daily_sent += 1
         user.messages_sent += 1
         log_entry = WhatsAppMessageLog(
             user_id=user.id,
@@ -584,8 +587,9 @@ def send_whatsapp_message(req: WhatsAppSendRequest, db: Session = Depends(get_db
         return {
             "status": "success",
             "gateway_response": dispatch_res,
-            "messages_sent": user.messages_sent,
-            "messages_remaining": max(0, user.monthly_limit - user.messages_sent)
+            "daily_sent": user.daily_sent,
+            "daily_limit": user.daily_limit,
+            "daily_remaining": max(0, user.daily_limit - user.daily_sent)
         }
     except Exception as e:
         db.rollback()

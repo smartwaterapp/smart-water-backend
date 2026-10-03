@@ -8,8 +8,11 @@ class WhatsAppUser(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True)
     api_key = Column(String, unique=True, index=True)
-    plan_name = Column(String, default="Smart Business (10 JD)")
-    monthly_limit = Column(Integer, default=1000)
+    plan_name = Column(String, default="Daily Smart Plan (100 msgs/day)")
+    daily_limit = Column(Integer, default=100)
+    daily_sent = Column(Integer, default=0)
+    last_reset_date = Column(String, default="") # Format YYYY-MM-DD
+    monthly_limit = Column(Integer, default=3000)
     messages_sent = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)

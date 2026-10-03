@@ -5,22 +5,33 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from whatsapp_models import WhatsAppUser, WhatsAppMessageLog
 
-DEFAULT_API_KEY = "pyezpulse_master_key"
+DEFAULT_API_KEY = "pyez"
 
-def get_or_create_default_user(db: Session) -> WhatsAppUser:
-    user = db.query(WhatsAppUser).filter(WhatsAppUser.api_key == DEFAULT_API_KEY).first()
+def get_or_create_default_user(db: Session, api_key: str = "pyez") -> WhatsAppUser:
+    today_str = datetime.utcnow().strftime("%Y-%m-%d")
+    user = db.query(WhatsAppUser).filter(WhatsAppUser.api_key == api_key).first()
     if not user:
         user = WhatsAppUser(
-            username="PyezPulse Admin",
-            api_key=DEFAULT_API_KEY,
-            plan_name="Smart Business (10 JD)",
-            monthly_limit=1000,
+            username="mujahid",
+            api_key=api_key,
+            plan_name="Daily Smart Plan (100 msgs/day)",
+            daily_limit=100,
+            daily_sent=0,
+            last_reset_date=today_str,
+            monthly_limit=3000,
             messages_sent=0,
             is_active=True
         )
         db.add(user)
         db.commit()
         db.refresh(user)
+    else:
+        # Automatic daily reset check
+        if user.last_reset_date != today_str:
+            user.daily_sent = 0
+            user.last_reset_date = today_str
+            db.commit()
+            db.refresh(user)
     return user
 
 def dispatch_whatsapp_message(to_number: str, message_text: str, instance_id: str, token: str) -> dict:
