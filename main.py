@@ -416,6 +416,7 @@ def update_channel(
                 channel = models.Channel(id=8, name="Mafia Game Sync", write_api_key="MAFIA_WRITE_KEY", read_api_key="MAFIA_READ_KEY")
                 db.add(channel)
                 try: db.commit(); db.refresh(channel)
+                except: db.rollback(); channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
             elif api_key == "pyez":
                 channel = models.Channel(id=9, name="Pyezpulse", write_api_key="pyez", read_api_key="pulse")
                 db.add(channel)
