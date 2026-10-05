@@ -19,16 +19,91 @@ except Exception as e:
     print(f"WhatsApp tables init notice: {e}")
 
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi import Request
 
 app = FastAPI(title="Smart Water Backend (ThingSpeak Clone)")
 
+# ===== DASHBOARD ADMIN PASSWORD CONFIGURATION =====
+import os
+DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "123456")
+DASHBOARD_COOKIE_NAME = "sw_dash_auth"
+DASHBOARD_COOKIE_VALUE = "authenticated_admin_session"
+
+def is_dashboard_authenticated(request: Request) -> bool:
+    return request.cookies.get(DASHBOARD_COOKIE_NAME) == DASHBOARD_COOKIE_VALUE
+
+def get_login_html(error: str = ""):
+    error_banner = f'<div style="background:#fee2e2;color:#991b1b;padding:10px;border-radius:6px;margin-bottom:15px;font-size:14px;border:1px solid #f87171;">⚠️ {error}</div>' if error else ''
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Login - Smart Water Dashboard</title>
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f1f5f9; display: flex; align-items: center; justify-content: center; min-height: 80vh; margin: 0; padding: 20px; }}
+  .login-card {{ background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); width: 100%; max-width: 380px; text-align: center; }}
+  h2 {{ color: #0f172a; margin-top: 0; margin-bottom: 8px; font-size: 22px; }}
+  p {{ color: #64748b; font-size: 14px; margin-bottom: 24px; }}
+  input[type="password"] {{ width: 100%; box-sizing: border-box; padding: 12px; border: 1.5px solid #cbd5e1; border-radius: 8px; font-size: 15px; margin-bottom: 16px; text-align: center; }}
+  input[type="password"]:focus {{ outline: none; border-color: #2563eb; }}
+  button {{ width: 100%; background: #2563eb; color: white; border: none; padding: 12px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.2s; }}
+  button:hover {{ background: #1d4ed8; }}
+  .hint {{ margin-top: 20px; font-size: 12px; color: #94a3b8; }}
+</style>
+</head>
+<body>
+<div class="login-card">
+  <h2>🔒 Dashboard Access</h2>
+  <p>Please enter the dashboard password to view and manage channels.</p>
+  {error_banner}
+  <form method="POST" action="/login">
+    <input type="password" name="password" placeholder="Enter Dashboard Password" required autofocus>
+    <button type="submit">Unlock Dashboard</button>
+  </form>
+  <div class="hint">Default Password: 123456</div>
+</div>
+</body>
+</html>"""
+
+@app.get('/login', response_class=HTMLResponse, tags=['Dashboard'])
+def login_page(request: Request):
+    if is_dashboard_authenticated(request):
+        return RedirectResponse(url="/", status_code=303)
+    return get_login_html()
+
+@app.post('/login', tags=['Dashboard'])
+def login_post(password: str = FastForm(...)):
+    if password == DASHBOARD_PASSWORD:
+        response = RedirectResponse(url="/", status_code=303)
+        response.set_cookie(
+            key=DASHBOARD_COOKIE_NAME,
+            value=DASHBOARD_COOKIE_VALUE,
+            httponly=True,
+            max_age=86400 * 30, # 30 days
+            samesite="lax"
+        )
+        return response
+    return HTMLResponse(get_login_html("Invalid password! Please try again."), status_code=401)
+
+@app.get('/logout', tags=['Dashboard'])
+def logout():
+    response = RedirectResponse(url="/login", status_code=303)
+    response.delete_cookie(DASHBOARD_COOKIE_NAME)
+    return response
+
 @app.get('/', response_class=HTMLResponse, tags=['Dashboard'])
-def web_dashboard(db: Session = Depends(get_db)):
+def web_dashboard(request: Request, db: Session = Depends(get_db)):
+    if not is_dashboard_authenticated(request):
+        return RedirectResponse(url="/login", status_code=303)
+
     channels = db.query(models.Channel).all()
     html = """<html><head><title>Smart Water Dashboard</title>
 <style>
 body{font-family:sans-serif;padding:20px;background:#f4f4f9;}
+.header-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;}
+.logout-btn{background:#e53935;color:white;text-decoration:none;padding:8px 16px;border-radius:6px;font-size:14px;font-weight:bold;}
 .card{background:white;padding:20px;margin-bottom:15px;border-radius:8px;box-shadow:0 2px 5px rgba(0,0,0,0.1);position:relative;}
 input,button{padding:8px 12px;margin:4px;border-radius:4px;border:1px solid #ccc;}
 button{background:#4CAF50;color:white;border:none;cursor:pointer;}
@@ -40,7 +115,10 @@ button{background:#4CAF50;color:white;border:none;cursor:pointer;}
 .form-card{background:#e8f5e9;padding:20px;margin-bottom:20px;border-radius:8px;}
 label{font-weight:bold;margin-right:8px;}
 </style></head><body>
-<h1>💧 Smart Water Web Dashboard</h1>
+<div class="header-bar">
+  <h1>💧 Smart Water Web Dashboard</h1>
+  <a href="/logout" class="logout-btn">🔒 Logout</a>
+</div>
 <div class="form-card"><h2>➕ Create New Channel</h2>
 <form method="POST" action="/channels/create">
 <label>Name:</label><input type="text" name="name" required placeholder="My Channel"><br>
@@ -69,12 +147,15 @@ label{font-weight:bold;margin-right:8px;}
 
 @app.post('/channels/create', tags=['Management'])
 def create_channel_form(
+    request: Request,
     name: str = FastForm(...),
     id: Optional[int] = FastForm(None),
     write_api_key: Optional[str] = FastForm(None),
     read_api_key: Optional[str] = FastForm(None),
     db: Session = Depends(get_db)
 ):
+    if not is_dashboard_authenticated(request):
+        return RedirectResponse(url="/login", status_code=303)
     kwargs = {"name": name}
     if id is not None and id > 0:
         existing = db.query(models.Channel).filter(models.Channel.id == id).first()
@@ -91,7 +172,9 @@ def create_channel_form(
     return RedirectResponse(url="/", status_code=303)
 
 @app.post('/channels/{channel_id}/delete', tags=['Management'])
-def delete_channel_form(channel_id: int, db: Session = Depends(get_db)):
+def delete_channel_form(channel_id: int, request: Request, db: Session = Depends(get_db)):
+    if not is_dashboard_authenticated(request):
+        return RedirectResponse(url="/login", status_code=303)
     db.query(models.Feed).filter(models.Feed.channel_id == channel_id).delete()
     channel = db.query(models.Channel).filter(models.Channel.id == channel_id).first()
     if channel:
@@ -100,7 +183,9 @@ def delete_channel_form(channel_id: int, db: Session = Depends(get_db)):
     return RedirectResponse(url="/", status_code=303)
 
 @app.post('/channels/{channel_id}/clear', tags=['Management'])
-def clear_channel_feeds(channel_id: int, db: Session = Depends(get_db)):
+def clear_channel_feeds(channel_id: int, request: Request, db: Session = Depends(get_db)):
+    if not is_dashboard_authenticated(request):
+        return RedirectResponse(url="/login", status_code=303)
     db.query(models.Feed).filter(models.Feed.channel_id == channel_id).delete()
     db.commit()
     return RedirectResponse(url="/", status_code=303)
