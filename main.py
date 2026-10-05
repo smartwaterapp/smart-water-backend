@@ -26,7 +26,7 @@ app = FastAPI(title="Smart Water Backend (ThingSpeak Clone)")
 
 # ===== DASHBOARD ADMIN PASSWORD CONFIGURATION =====
 import os
-DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "123456")
+DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "pyezen")
 DASHBOARD_COOKIE_NAME = "sw_dash_auth"
 DASHBOARD_COOKIE_VALUE = "authenticated_admin_session"
 
@@ -50,7 +50,6 @@ def get_login_html(error: str = ""):
   input[type="password"]:focus {{ outline: none; border-color: #2563eb; }}
   button {{ width: 100%; background: #2563eb; color: white; border: none; padding: 12px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; transition: 0.2s; }}
   button:hover {{ background: #1d4ed8; }}
-  .hint {{ margin-top: 20px; font-size: 12px; color: #94a3b8; }}
 </style>
 </head>
 <body>
@@ -62,7 +61,6 @@ def get_login_html(error: str = ""):
     <input type="password" name="password" placeholder="Enter Dashboard Password" required autofocus>
     <button type="submit">Unlock Dashboard</button>
   </form>
-  <div class="hint">Default Password: 123456</div>
 </div>
 </body>
 </html>"""
