@@ -212,15 +212,22 @@ _SEED_CHANNELS = [
     {"id": 123456, "name": "scool bell",        "write_api_key": "write",                   "read_api_key": "read"},
 ]
 
+_last_cleanup_time = None
+
 def cleanup_old_feeds(db: Session, max_age_days: int = 2):
     """
     Deletes feeds in all channels where created_at is older than `max_age_days` (default 2 days).
     Always retains the single latest feed for every channel so tanks always retain their current state.
+    Rate-limited to run at most once every 30 minutes.
     """
+    global _last_cleanup_time
+    from datetime import datetime, timedelta
+    now = datetime.utcnow()
+    if _last_cleanup_time and (now - _last_cleanup_time).total_seconds() < 1800:
+        return
+
     try:
-        from datetime import datetime, timedelta
-        cutoff = datetime.utcnow() - timedelta(days=max_age_days)
-        # Find all distinct channels with feeds older than cutoff
+        cutoff = now - timedelta(days=max_age_days)
         channels = db.query(models.Channel).all()
         for ch in channels:
             latest = db.query(models.Feed).filter(models.Feed.channel_id == ch.id)\
@@ -229,11 +236,11 @@ def cleanup_old_feeds(db: Session, max_age_days: int = 2):
                 models.Feed.channel_id == ch.id,
                 models.Feed.created_at < cutoff
             )
-            # Make sure we never delete the latest reading even if inactive
             if latest:
                 query = query.filter(models.Feed.id != latest.id)
-            deleted_count = query.delete(synchronize_session=False)
+            query.delete(synchronize_session=False)
         db.commit()
+        _last_cleanup_time = now
     except Exception as e:
         db.rollback()
         print(f"Cleanup error: {e}")
@@ -531,9 +538,6 @@ def read_feeds(
 
     if channel.read_api_key != api_key:
         raise HTTPException(status_code=403, detail="Invalid Read API Key")
-
-    # Clean up data older than 2 days automatically on read
-    cleanup_old_feeds(db, max_age_days=2)
 
     query = db.query(models.Feed).filter(models.Feed.channel_id == channel.id)
     

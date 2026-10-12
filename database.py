@@ -8,7 +8,18 @@ SQLALCHEMY_DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./smart_wate
 
 # Only use check_same_thread for SQLite
 if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
-    engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+    from sqlalchemy import event
+    engine = create_engine(
+        SQLALCHEMY_DATABASE_URL,
+        connect_args={"check_same_thread": False, "timeout": 30}
+    )
+    @event.listens_for(engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=30000")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.close()
 else:
     # Fix for newer SQLAlchemy with older Postgres URI schemes (postgres:// -> postgresql://)
     if SQLALCHEMY_DATABASE_URL.startswith("postgres://"):
