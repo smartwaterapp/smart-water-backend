@@ -24,10 +24,6 @@ from fastapi import Request
 
 app = FastAPI(title="Smart Water Backend (ThingSpeak Clone)")
 
-@app.get("/time", tags=["System"])
-def get_current_epoch_time():
-    return {"epoch": int(time.time()), "iso": datetime.utcnow().isoformat()}
-
 # ===== DASHBOARD ADMIN PASSWORD CONFIGURATION =====
 import os
 DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "pyezen")
