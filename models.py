@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Index
 from sqlalchemy.orm import relationship
 from database import Base
 import datetime
@@ -30,10 +30,14 @@ class Channel(Base):
 
 class Feed(Base):
     __tablename__ = "feeds"
+    __table_args__ = (
+        Index("idx_feeds_channel_id_id", "channel_id", "id"),
+        Index("idx_feeds_channel_created_at", "channel_id", "created_at"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    channel_id = Column(Integer, ForeignKey("channels.id"))
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    channel_id = Column(Integer, ForeignKey("channels.id"), index=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, index=True)
     
     field1 = Column(String, nullable=True)
     field2 = Column(String, nullable=True)

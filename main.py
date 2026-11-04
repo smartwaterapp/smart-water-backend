@@ -127,8 +127,14 @@ label{font-weight:bold;margin-right:8px;}
 </form></div>"""
     if not channels:
         html += '<p>No channels found.</p>'
+    from sqlalchemy import func
+    counts_by_ch = dict(
+        db.query(models.Feed.channel_id, func.count(models.Feed.id))
+        .group_by(models.Feed.channel_id)
+        .all()
+    )
     for c in channels:
-        feed_count = db.query(models.Feed).filter(models.Feed.channel_id == c.id).count()
+        feed_count = counts_by_ch.get(c.id, 0)
         html += f'<div class="card"><h2>{c.name} (ID: {c.id})</h2>'
         html += f'<p><b>Read Key:</b> <code>{c.read_api_key}</code></p>'
         html += f'<p><b>Write Key:</b> <code>{c.write_api_key}</code></p>'
@@ -173,6 +179,7 @@ def create_channel_form(
 def delete_channel_form(channel_id: int, request: Request, db: Session = Depends(get_db)):
     if not is_dashboard_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
+    _LATEST_FEED_CACHE.pop(channel_id, None)
     db.query(models.Feed).filter(models.Feed.channel_id == channel_id).delete()
     channel = db.query(models.Channel).filter(models.Channel.id == channel_id).first()
     if channel:
@@ -184,6 +191,7 @@ def delete_channel_form(channel_id: int, request: Request, db: Session = Depends
 def clear_channel_feeds(channel_id: int, request: Request, db: Session = Depends(get_db)):
     if not is_dashboard_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
+    _LATEST_FEED_CACHE.pop(channel_id, None)
     db.query(models.Feed).filter(models.Feed.channel_id == channel_id).delete()
     db.commit()
     return RedirectResponse(url="/", status_code=303)
@@ -193,22 +201,44 @@ def delete_channel_api(channel_id: int, db: Session = Depends(get_db)):
     channel = db.query(models.Channel).filter(models.Channel.id == channel_id).first()
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
+    _LATEST_FEED_CACHE.pop(channel_id, None)
     db.query(models.Feed).filter(models.Feed.channel_id == channel_id).delete()
     db.delete(channel)
     db.commit()
     return {"message": f"Channel {channel_id} deleted successfully"}
 
+# -- In-memory cache of the latest feed per channel for O(1) instant reads/writes --
+_LATEST_FEED_CACHE = {}
+
+def _cache_feed(feed_obj):
+    if not feed_obj:
+        return None
+    entry = {
+        "id": feed_obj.id,
+        "channel_id": feed_obj.channel_id,
+        "created_at": feed_obj.created_at,
+        "field1": feed_obj.field1,
+        "field2": feed_obj.field2,
+        "field3": feed_obj.field3,
+        "field4": feed_obj.field4,
+        "field5": feed_obj.field5,
+        "field6": feed_obj.field6,
+        "field7": feed_obj.field7,
+        "field8": feed_obj.field8,
+    }
+    _LATEST_FEED_CACHE[feed_obj.channel_id] = entry
+    return entry
+
 # -- Seed known channels on startup so reads never 404 after a fresh deploy --
 _SEED_CHANNELS = [
     {"id": 1, "name": "yousvin8 tank",         "write_api_key": "yousvin8",                "read_api_key": "elias gg"},
     {"id": 2, "name": "Smart Water Channel",  "write_api_key": "IPwXiTFSujeNNWd2HAMRfg", "read_api_key": "v_9jxuU6dHmXxNUsCdcERA"},
-    {"id": 3, "name": "Tank 3 Motor Channel", "write_api_key": "MOTOR_WRITE_KEY",        "read_api_key": "MOTOR_READ_KEY"},
-    {"id": 4, "name": "Tita Main Tanks",       "write_api_key": "TITA_WRITE_KEY",         "read_api_key": "TITA_READ_KEY"},
+    {"id": 3, "name": "esp working",          "write_api_key": "esp",                    "read_api_key": "working"},
+    {"id": 4, "name": "pyezdoor",               "write_api_key": "pyez",                    "read_api_key": "door"},
     {"id": 5, "name": "Tita Motor 1",          "write_api_key": "TITA_M1_WRITE",          "read_api_key": "TITA_M1_READ"},
     {"id": 6, "name": "Tita Motor 2",          "write_api_key": "TITA_M2_WRITE",          "read_api_key": "TITA_M2_READ"},
-    {"id": 7, "name": "Tank 1 Motor Channel",   "write_api_key": "TANK1_M_WRITE",          "read_api_key": "TANK1_M_READ"},
     {"id": 8, "name": "Mafia Game Sync",       "write_api_key": "MAFIA_WRITE_KEY",        "read_api_key": "MAFIA_READ_KEY"},
-    {"id": 9, "name": "Pyezpulse",             "write_api_key": "pyez",                    "read_api_key": "pulse"},
+    {"id": 9, "name": "Pyezpulse",             "write_api_key": "pyezpulse_w",             "read_api_key": "pulse"},
     {"id": 123456, "name": "scool bell",        "write_api_key": "write",                   "read_api_key": "read"},
 ]
 
@@ -222,8 +252,20 @@ def cleanup_old_feeds(db: Session, max_age_days: int = 2):
 @app.on_event("startup")
 def startup_init():
     from database import SessionLocal
+    from sqlalchemy import text
     db = SessionLocal()
     try:
+        # 1. Ensure high-speed composite indexes exist on feeds table (critical for 500k+ rows)
+        try:
+            db.execute(text("CREATE INDEX IF NOT EXISTS idx_feeds_channel_id_id ON feeds (channel_id, id DESC);"))
+            db.execute(text("CREATE INDEX IF NOT EXISTS idx_feeds_channel_created_at ON feeds (channel_id, created_at DESC);"))
+            db.commit()
+            print("Database indexes verified/created on feeds table.")
+        except Exception as idx_err:
+            db.rollback()
+            print(f"Index creation notice: {idx_err}")
+
+        # 2. Seed/update channels
         for ch in _SEED_CHANNELS:
             exists = db.query(models.Channel).filter(models.Channel.id == ch["id"]).first()
             if not exists:
@@ -234,8 +276,19 @@ def startup_init():
                 exists.read_api_key = ch["read_api_key"]
         db.commit()
         print(f"Seeded/Updated {len(_SEED_CHANNELS)} channels")
-        # Run cleanup on startup
-        cleanup_old_feeds(db, max_age_days=2)
+
+        # 3. Pre-warm latest feed cache for each channel using index
+        all_channels = db.query(models.Channel).all()
+        for ch_obj in all_channels:
+            latest = (
+                db.query(models.Feed)
+                .filter(models.Feed.channel_id == ch_obj.id)
+                .order_by(models.Feed.id.desc())
+                .first()
+            )
+            if latest:
+                _cache_feed(latest)
+        print(f"Pre-warmed latest feed cache for {len(_LATEST_FEED_CACHE)} channels.")
     except Exception as e:
         db.rollback()
         print(f"Startup initialization error: {e}")
@@ -368,6 +421,11 @@ def update_channel(
                 except:
                     db.rollback()
                     channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
+            elif api_key == "esp":
+                channel = models.Channel(id=3, name="esp working", write_api_key="esp", read_api_key="working")
+                db.add(channel)
+                try: db.commit(); db.refresh(channel)
+                except: db.rollback(); channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
             elif api_key == "MOTOR_WRITE_KEY":
                 channel = models.Channel(id=3, name="Tank 3 Motor Channel", write_api_key="MOTOR_WRITE_KEY", read_api_key="MOTOR_READ_KEY")
                 db.add(channel)
@@ -399,7 +457,7 @@ def update_channel(
                 try: db.commit(); db.refresh(channel)
                 except: db.rollback(); channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
             elif api_key == "pyez":
-                channel = models.Channel(id=9, name="Pyezpulse", write_api_key="pyez", read_api_key="pulse")
+                channel = models.Channel(id=4, name="pyezdoor", write_api_key="pyez", read_api_key="door")
                 db.add(channel)
                 try: db.commit(); db.refresh(channel)
                 except: db.rollback(); channel = db.query(models.Channel).filter(models.Channel.write_api_key == api_key).first()
@@ -411,17 +469,26 @@ def update_channel(
             else:
                 raise HTTPException(status_code=400, detail="Invalid API Key")
 
-        # Inherit fields
-        prev_feed = db.query(models.Feed).filter(models.Feed.channel_id == channel.id).order_by(models.Feed.created_at.desc()).first()
-        if prev_feed:
-            if field1 is None: field1 = prev_feed.field1
-            if field2 is None: field2 = prev_feed.field2
-            if field3 is None: field3 = prev_feed.field3
-            if field4 is None: field4 = prev_feed.field4
-            if field5 is None: field5 = prev_feed.field5
-            if field6 is None: field6 = prev_feed.field6
-            if field7 is None: field7 = prev_feed.field7
-            if field8 is None: field8 = prev_feed.field8
+        # Inherit omitted fields in O(1) from cache (fallback to indexed PK query on cache miss)
+        cached_prev = _LATEST_FEED_CACHE.get(channel.id)
+        if cached_prev is None:
+            prev_feed_obj = (
+                db.query(models.Feed)
+                .filter(models.Feed.channel_id == channel.id)
+                .order_by(models.Feed.id.desc())
+                .first()
+            )
+            cached_prev = _cache_feed(prev_feed_obj)
+
+        if cached_prev:
+            if field1 is None: field1 = cached_prev["field1"]
+            if field2 is None: field2 = cached_prev["field2"]
+            if field3 is None: field3 = cached_prev["field3"]
+            if field4 is None: field4 = cached_prev["field4"]
+            if field5 is None: field5 = cached_prev["field5"]
+            if field6 is None: field6 = cached_prev["field6"]
+            if field7 is None: field7 = cached_prev["field7"]
+            if field8 is None: field8 = cached_prev["field8"]
 
         db_feed = models.Feed(
             channel_id=channel.id, field1=field1, field2=field2, field3=field3,
@@ -429,29 +496,23 @@ def update_channel(
         )
         db.add(db_feed)
         db.commit()
+        _cache_feed(db_feed)
 
-        # Alarm logic
-        if field1 is not None or field3 is not None:
-            def get_last_val_str(field_name):
-                f = db.query(getattr(models.Feed, field_name)).filter(models.Feed.channel_id == channel.id, getattr(models.Feed, field_name) != None).order_by(models.Feed.created_at.desc()).first()
-                return f[0] if f else None
-                
-            alarm_data = get_last_val_str("field8")
+        # Non-blocking alarm logic using already-inherited field8 (zero extra DB queries)
+        if (field1 is not None or field3 is not None) and field8:
+            alarm_data = field8
             target_email = "none"
             threshold = 20.0
-            
-            if alarm_data:
-                parts = alarm_data.split("|")
-                if len(parts) == 2:
-                    target_email = parts[0]
-                    try: threshold = float(parts[1])
-                    except: pass
-                else:
-                    try: threshold = float(alarm_data)
-                    except: pass
 
-            if target_email != "none":
+            parts = alarm_data.split("|")
+            if len(parts) == 2:
+                target_email = parts[0]
+                try: threshold = float(parts[1])
+                except: pass
+
+            if target_email != "none" and "@" in target_email:
                 import datetime as dt_module
+                import threading
                 if field1 is not None:
                     try:
                         pct1 = float(field1)
@@ -459,8 +520,8 @@ def update_channel(
                             now = dt_module.datetime.utcnow()
                             last = last_alarm_time.get("tank1")
                             if not last or (now - last).total_seconds() > 3600:
-                                send_email_alarm(target_email, "Tank 1", pct1)
                                 last_alarm_time["tank1"] = now
+                                threading.Thread(target=send_email_alarm, args=(target_email, "Tank 1", pct1), daemon=True).start()
                     except: pass
                 if field3 is not None:
                     try:
@@ -469,15 +530,11 @@ def update_channel(
                             now = dt_module.datetime.utcnow()
                             last = last_alarm_time.get("tank3")
                             if not last or (now - last).total_seconds() > 3600:
-                                send_email_alarm(target_email, "Tank 3", pct3)
                                 last_alarm_time["tank3"] = now
+                                threading.Thread(target=send_email_alarm, args=(target_email, "Tank 3", pct3), daemon=True).start()
                     except: pass
 
-        # Clean up records older than 2 days automatically
-        cleanup_old_feeds(db, max_age_days=2)
-
-        entry_count = db.query(models.Feed).filter(models.Feed.channel_id == channel.id).count()
-        return entry_count
+        return db_feed.id
         
     except Exception as e:
         import traceback
@@ -494,7 +551,8 @@ def read_feeds(
     db: Session = Depends(get_db)
 ):
     # Lookup by ID, or fallback to matching by read_api_key (supports channel 2 alias for channel 3211060)
-    channel = db.query(models.Channel).filter(models.Channel.id == channel_id).first()
+    lookup_id = 2 if channel_id == 3211060 else channel_id
+    channel = db.query(models.Channel).filter(models.Channel.id == lookup_id).first()
     if not channel and channel_id == 2:
         channel = db.query(models.Channel).filter(models.Channel.id == 3211060).first()
     if not channel:
@@ -513,8 +571,41 @@ def read_feeds(
     if channel.read_api_key != api_key:
         raise HTTPException(status_code=403, detail="Invalid Read API Key")
 
-    # Clean up data older than 2 days automatically on read
-    cleanup_old_feeds(db, max_age_days=2)
+    channel_meta = {
+        "id": channel.id,
+        "name": channel.name,
+        "description": channel.description,
+        "field1": channel.field1_name,
+        "field2": channel.field2_name,
+        "field3": channel.field3_name,
+        "field4": channel.field4_name,
+        "field5": channel.field5_name,
+        "field6": channel.field6_name,
+        "field7": channel.field7_name,
+        "field8": channel.field8_name,
+    }
+
+    # Ultra-fast O(1) path for results=1 when cached
+    if minutes is None and results == 1:
+        cached = _LATEST_FEED_CACHE.get(channel.id)
+        if cached is not None:
+            return {
+                "channel": channel_meta,
+                "feeds": [
+                    {
+                        "created_at": cached["created_at"].isoformat() + "Z",
+                        "entry_id": cached["id"],
+                        "field1": cached["field1"],
+                        "field2": cached["field2"],
+                        "field3": cached["field3"],
+                        "field4": cached["field4"],
+                        "field5": cached["field5"],
+                        "field6": cached["field6"],
+                        "field7": cached["field7"],
+                        "field8": cached["field8"],
+                    }
+                ],
+            }
 
     query = db.query(models.Feed).filter(models.Feed.channel_id == channel.id)
     
@@ -522,26 +613,15 @@ def read_feeds(
         import datetime as dt_module
         cutoff = dt_module.datetime.utcnow() - dt_module.timedelta(minutes=minutes)
         query = query.filter(models.Feed.created_at >= cutoff)
-        feeds = query.order_by(models.Feed.created_at.asc()).all()
+        feeds = query.order_by(models.Feed.id.asc()).all()
     else:
-        feeds = query.order_by(models.Feed.created_at.desc()).limit(results).all()
+        feeds = query.order_by(models.Feed.id.desc()).limit(results).all()
+        if feeds:
+            _cache_feed(feeds[0])
         feeds = list(reversed(feeds))
              
-    # Format response to look similar to ThingSpeak
-    response = {
-        "channel": {
-            "id": channel.id,
-            "name": channel.name,
-            "description": channel.description,
-            "field1": channel.field1_name,
-            "field2": channel.field2_name,
-            "field3": channel.field3_name,
-            "field4": channel.field4_name,
-            "field5": channel.field5_name,
-            "field6": channel.field6_name,
-            "field7": channel.field7_name,
-            "field8": channel.field8_name,
-        },
+    return {
+        "channel": channel_meta,
         "feeds": [
             {
                 "created_at": feed.created_at.isoformat() + "Z",
@@ -557,7 +637,6 @@ def read_feeds(
             } for feed in feeds
         ]
     }
-    return response
 
 @app.get("/channels/{channel_id}/fields/{field_id}/last.json", tags=["Data Retrieval"])
 def read_last_field(
@@ -569,20 +648,30 @@ def read_last_field(
     if field_id < 1 or field_id > 8:
         raise HTTPException(status_code=400, detail="Invalid field ID (must be 1-8)")
 
-    channel = db.query(models.Channel).filter(models.Channel.id == channel_id).first()
+    lookup_id = 2 if channel_id == 3211060 else channel_id
+    channel = db.query(models.Channel).filter(models.Channel.id == lookup_id).first()
+    if not channel:
+        channel = db.query(models.Channel).filter(models.Channel.read_api_key == api_key).first()
     if not channel:
         return "-1"
         
     if channel.read_api_key != api_key:
         raise HTTPException(status_code=403, detail="-1")
 
-    feed = db.query(models.Feed).filter(models.Feed.channel_id == channel_id)\
-             .order_by(models.Feed.created_at.desc()).first()
-             
-    if not feed:
+    cached = _LATEST_FEED_CACHE.get(channel.id)
+    if cached is None:
+        feed = (
+            db.query(models.Feed)
+            .filter(models.Feed.channel_id == channel.id)
+            .order_by(models.Feed.id.desc())
+            .first()
+        )
+        cached = _cache_feed(feed)
+
+    if not cached:
         return "-1"
 
-    field_value = getattr(feed, f"field{field_id}")
+    field_value = cached.get(f"field{field_id}")
     if field_value is None:
         return "-1"
     return str(field_value)
