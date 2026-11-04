@@ -277,7 +277,38 @@ def startup_init():
         db.commit()
         print(f"Seeded/Updated {len(_SEED_CHANNELS)} channels")
 
-        # 3. Pre-warm latest feed cache for each channel using index
+        # 3. Ensure Channel 2 has default motor & alert settings if empty or missing after fresh deploy
+        ch2_latest = (
+            db.query(models.Feed)
+            .filter(models.Feed.channel_id == 2)
+            .order_by(models.Feed.id.desc())
+            .first()
+        )
+        if not ch2_latest:
+            seed_feed = models.Feed(
+                channel_id=2,
+                field1="24.0:20.0:25.0",
+                field2="2",
+                field3="50:95",
+                field4="0;0;0",
+                field5="2",
+                field6="50:85",
+                field7="4;0;02:53pm",
+                field8="1:20:<=:0778461996",
+            )
+            db.add(seed_feed)
+            db.commit()
+        elif ch2_latest.field2 is None or ch2_latest.field5 is None:
+            if ch2_latest.field2 is None: ch2_latest.field2 = "2"
+            if ch2_latest.field3 is None: ch2_latest.field3 = "50:95"
+            if ch2_latest.field4 is None: ch2_latest.field4 = "0;0;0"
+            if ch2_latest.field5 is None: ch2_latest.field5 = "2"
+            if ch2_latest.field6 is None: ch2_latest.field6 = "50:85"
+            if ch2_latest.field7 is None: ch2_latest.field7 = "4;0;02:53pm"
+            if ch2_latest.field8 is None: ch2_latest.field8 = "1:20:<=:0778461996"
+            db.commit()
+
+        # 4. Pre-warm latest feed cache for each channel using index
         all_channels = db.query(models.Channel).all()
         for ch_obj in all_channels:
             latest = (
@@ -611,9 +642,23 @@ def read_feeds(
     
     if minutes is not None and minutes > 0:
         import datetime as dt_module
+        from sqlalchemy import func
         cutoff = dt_module.datetime.utcnow() - dt_module.timedelta(minutes=minutes)
-        query = query.filter(models.Feed.created_at >= cutoff)
-        feeds = query.order_by(models.Feed.id.asc()).all()
+        min_max = (
+            db.query(func.min(models.Feed.id), func.max(models.Feed.id))
+            .filter(models.Feed.channel_id == channel.id, models.Feed.created_at >= cutoff)
+            .first()
+        )
+        if min_max and min_max[0] is not None and min_max[1] is not None:
+            min_id, max_id = min_max[0], min_max[1]
+            span = max_id - min_id
+            step = max(1, span // 200)
+            query = query.filter(models.Feed.id >= min_id)
+            if step > 1:
+                query = query.filter((models.Feed.id % step == 0) | (models.Feed.id == max_id))
+            feeds = query.order_by(models.Feed.id.asc()).limit(250).all()
+        else:
+            feeds = []
     else:
         feeds = query.order_by(models.Feed.id.desc()).limit(results).all()
         if feeds:
