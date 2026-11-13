@@ -1,6 +1,7 @@
-from fastapi import FastAPI, Depends, HTTPException, Query, Form as FastForm
+from fastapi import FastAPI, Depends, HTTPException, Query, Form as FastForm, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import Optional, List
+import hashlib
 import models
 from database import engine, get_db
 from pydantic import BaseModel
@@ -125,6 +126,25 @@ label{font-weight:bold;margin-right:8px;}
 <label>Read Key (optional):</label><input type="text" name="read_api_key" placeholder="Auto"><br>
 <button type="submit">Create Channel</button>
 </form></div>"""
+    ota_releases = db.query(models.FirmwareRelease).all()
+    html += """<div class="form-card" style="background:#e0f2fe;"><h2>📡 Wireless OTA Firmware Manager</h2>
+<form method="POST" action="/ota/upload" enctype="multipart/form-data">
+<label>Device Type:</label><select name="device_type" style="padding:8px;border-radius:4px;border:1px solid #ccc;">
+  <option value="ota_test">ota_test</option>
+  <option value="dual_motor">dual_motor</option>
+  <option value="roof_sensors">roof_sensors</option>
+  <option value="yousvin8_tank">yousvin8_tank</option>
+</select>
+<label>Version:</label><input type="text" name="version" required placeholder="1.0.1">
+<label>Firmware (.bin):</label><input type="file" name="file" accept=".bin" required>
+<button type="submit" style="background:#0284c7;">Upload Firmware</button>
+</form>"""
+    if ota_releases:
+        html += "<ul>"
+        for rel in ota_releases:
+            html += f"<li><b>{rel.device_type}</b>: v{rel.version} ({rel.size_bytes} bytes, {rel.filename}) - Updated {rel.updated_at.strftime('%Y-%m-%d %H:%M UTC')}</li>"
+        html += "</ul>"
+    html += "</div>"
     if not channels:
         html += '<p>No channels found.</p>'
     from sqlalchemy import func
@@ -805,3 +825,89 @@ def get_whatsapp_logs(limit: int = 50, db: Session = Depends(get_db)):
         "status": l.status,
         "created_at": l.created_at.isoformat() + "Z" if l.created_at else None
     } for l in logs]
+
+
+# ==========================================
+# 📡 Wireless OTA Firmware Endpoints (ESP8266)
+# ==========================================
+
+@app.post("/ota/upload", tags=["OTA"])
+async def upload_ota_firmware(
+    request: Request,
+    device_type: str = FastForm(...),
+    version: str = FastForm(...),
+    file: UploadFile = File(...),
+    password: Optional[str] = FastForm(None),
+    db: Session = Depends(get_db)
+):
+    if not is_dashboard_authenticated(request) and password != DASHBOARD_PASSWORD:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    clean_type = device_type.strip()
+    clean_ver = version.strip().lstrip("vV")
+    if not clean_type or not clean_ver:
+        raise HTTPException(status_code=400, detail="device_type and version are required")
+
+    raw_bytes = await file.read()
+    if len(raw_bytes) < 1024:
+        raise HTTPException(status_code=400, detail="Invalid firmware binary (too small)")
+
+    digest = hashlib.sha256(raw_bytes).hexdigest()
+    existing = db.query(models.FirmwareRelease).filter(models.FirmwareRelease.device_type == clean_type).first()
+    if existing:
+        existing.version = clean_ver
+        existing.filename = file.filename or f"{clean_type}.bin"
+        existing.size_bytes = len(raw_bytes)
+        existing.sha256 = digest
+        existing.binary_data = raw_bytes
+        existing.updated_at = datetime.utcnow()
+    else:
+        db.add(models.FirmwareRelease(
+            device_type=clean_type,
+            version=clean_ver,
+            filename=file.filename or f"{clean_type}.bin",
+            size_bytes=len(raw_bytes),
+            sha256=digest,
+            binary_data=raw_bytes,
+            updated_at=datetime.utcnow()
+        ))
+    db.commit()
+
+    if is_dashboard_authenticated(request):
+        return RedirectResponse(url="/", status_code=303)
+    return {
+        "status": "ok",
+        "device_type": clean_type,
+        "version": clean_ver,
+        "size_bytes": len(raw_bytes),
+        "sha256": digest
+    }
+
+
+@app.get("/ota/{device_type}/version.json", tags=["OTA"])
+def get_ota_version(device_type: str, db: Session = Depends(get_db)):
+    rel = db.query(models.FirmwareRelease).filter(models.FirmwareRelease.device_type == device_type).first()
+    if not rel:
+        return {"device": device_type, "version": "", "size": 0}
+    return {
+        "device": rel.device_type,
+        "version": rel.version,
+        "size": rel.size_bytes,
+        "sha256": rel.sha256,
+        "url": f"/ota/{rel.device_type}/firmware.bin"
+    }
+
+
+@app.get("/ota/{device_type}/firmware.bin", tags=["OTA"])
+def download_ota_firmware(device_type: str, db: Session = Depends(get_db)):
+    rel = db.query(models.FirmwareRelease).filter(models.FirmwareRelease.device_type == device_type).first()
+    if not rel:
+        raise HTTPException(status_code=404, detail="Firmware not found")
+    return Response(
+        content=rel.binary_data,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{rel.filename}"',
+            "Content-Length": str(rel.size_bytes),
+        },
+    )

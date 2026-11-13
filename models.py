@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Index
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Index, LargeBinary
 from sqlalchemy.orm import relationship
 from database import Base
 import datetime
@@ -49,3 +49,15 @@ class Feed(Base):
     field8 = Column(String, nullable=True)
 
     channel = relationship("Channel", back_populates="feeds")
+
+
+class FirmwareRelease(Base):
+    __tablename__ = "firmware_releases"
+
+    device_type = Column(String, primary_key=True, index=True)
+    version = Column(String, nullable=False)
+    filename = Column(String, nullable=False)
+    size_bytes = Column(Integer, nullable=False)
+    sha256 = Column(String, nullable=False)
+    binary_data = Column(LargeBinary, nullable=False)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow)
