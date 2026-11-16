@@ -259,6 +259,7 @@ _SEED_CHANNELS = [
     {"id": 6, "name": "Tita Motor 2",          "write_api_key": "TITA_M2_WRITE",          "read_api_key": "TITA_M2_READ"},
     {"id": 8, "name": "Mafia Game Sync",       "write_api_key": "MAFIA_WRITE_KEY",        "read_api_key": "MAFIA_READ_KEY"},
     {"id": 9, "name": "Pyezpulse",             "write_api_key": "pyezpulse_w",             "read_api_key": "pulse"},
+    {"id": 10, "name": "pyezdoor3",            "write_api_key": "pyez3",                   "read_api_key": "door3"},
     {"id": 123456, "name": "scool bell",        "write_api_key": "write",                   "read_api_key": "read"},
 ]
 
