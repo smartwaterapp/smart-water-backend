@@ -260,7 +260,9 @@ _SEED_CHANNELS = [
     {"id": 8, "name": "Mafia Game Sync",       "write_api_key": "MAFIA_WRITE_KEY",        "read_api_key": "MAFIA_READ_KEY"},
     {"id": 9, "name": "Pyezpulse",             "write_api_key": "pyezpulse_w",             "read_api_key": "pulse"},
     {"id": 10, "name": "pyezdoor3",            "write_api_key": "pyez3",                   "read_api_key": "door3"},
-    {"id": 123456, "name": "scool bell",        "write_api_key": "write",                   "read_api_key": "read"},
+    {"id": 11, "name": "app version",          "write_api_key": "app",                     "read_api_key": "updater"},
+    {"id": 123456, "name": "scool bell",       "write_api_key": "write",                   "read_api_key": "read"},
+    {"id": 712014, "name": "pyezen portal",    "write_api_key": "most",                    "read_api_key": "important"},
 ]
 
 def cleanup_old_feeds(db: Session, max_age_days: int = 2):
@@ -327,6 +329,14 @@ def startup_init():
             if ch2_latest.field6 is None: ch2_latest.field6 = "50:85"
             if ch2_latest.field7 is None: ch2_latest.field7 = "4;0;02:53pm"
             if ch2_latest.field8 is None: ch2_latest.field8 = "1:20:<=:0778461996"
+            db.commit()
+
+        # 3b. Ensure Channel 11 (app version) and Channel 712014 (pyezen portal) have initial feeds if empty
+        if not db.query(models.Feed).filter(models.Feed.channel_id == 11).first():
+            db.add(models.Feed(channel_id=11, field1="3.44.5"))
+            db.commit()
+        if not db.query(models.Feed).filter(models.Feed.channel_id == 712014).first():
+            db.add(models.Feed(channel_id=712014, field1="smartwater: admin,tita o khalo,yousvin8"))
             db.commit()
 
         # 4. Pre-warm latest feed cache for each channel using index
